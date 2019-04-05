@@ -1,5 +1,4 @@
 #include "richtext.h"
-#include <iostream>
 #include <stack>
 #include <cmath>
 
