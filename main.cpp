@@ -1,5 +1,4 @@
 #include <SFML/Graphics.hpp>
-#include <iostream>
 #include "richtext.h"
 
 int main() {	
@@ -13,16 +12,17 @@ int main() {
 	
 	RichText rt;
 	rt.setCharacterSize(20);
-	sf::String str("Lorem ipsum dolor s<c=#FF00FF>it amet, <b>consectetur adip<u>iscing elit, sed do eiusm<ot=2,oc=#00FF00>od tempor incididunt </b>ut labore et dolore mag</u>na aliqua. Ut enim a</c>d minim veniam, quis nos</u>trud exercitation ullamco la</ot,/oc>boris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
+	sf::String str("This is normal text. Here co<u>Mes underlined. Outlines th<ot=2,oc=#000000>En arrive. Fancy co<c=#FF0000>Lor<oc=#00FF00>S, too. A line pa\nSses. It brings sp<lts=3,lns=1.1>Acing. Now strik<s>Ethrough joins, and underlined lea</u>Ves. No more c</c>Olo</oc>Rs. No more out</ot,/oc>Lines either. A line pass\nEs, and the spa</lts,/lns>Cing ends. Finally striket</s>Hrough leaves.");
 	rt.setString(str);
 	rt.setFont(font);
-	float limit = 250;
+	float limit = 230;
 	rt.setHorizontalLimit(limit);
 	rt.setDefaultFillColor(sf::Color::White);
-	size_t charLimit = 0;
+	rt.setPosition(50, 50);
+	size_t charLimit = 186;
 	rt.setCharacterLimit(charLimit);
 			
-	sf::RectangleShape rect(sf::Vector2f(rt.getLocalBounds().width, rt.getLocalBounds().height));
+	sf::RectangleShape rect(sf::Vector2f(limit, rt.getLocalBounds().height));
 	rect.setPosition(sf::Vector2f(rt.getLocalBounds().left, rt.getLocalBounds().top) + rt.getPosition());
 	rect.setFillColor(sf::Color::Blue);
 	
@@ -32,13 +32,13 @@ int main() {
                 window.close();
 			else if (haps.type == sf::Event::KeyPressed) {
 				if (haps.key.code == sf::Keyboard::Space) {
-					rt.setCharacterLimit(rt.getCharacterLimit()+1);
+					charLimit++;
+					rt.setCharacterLimit(charLimit);
 				}
 				else if (haps.key.code == sf::Keyboard::BackSpace) {
-					rt.setCharacterLimit(rt.getCharacterLimit()-1);
+					charLimit--;
+					rt.setCharacterLimit(charLimit);
 				}
-				rect.setSize(sf::Vector2f(rt.getLocalBounds().width, rt.getLocalBounds().height));
-				rect.setPosition(sf::Vector2f(rt.getLocalBounds().left, rt.getLocalBounds().top) + rt.getPosition());
 			}
 			else if (haps.type == sf::Event::MouseButtonPressed) {
 				if (haps.mouseButton.button == sf::Mouse::Left)
@@ -47,10 +47,11 @@ int main() {
 					limit -= 20;
 				}
 				rt.setHorizontalLimit(limit);
-				rect.setSize(sf::Vector2f(rt.getLocalBounds().width, rt.getLocalBounds().height));
-				rect.setPosition(sf::Vector2f(rt.getLocalBounds().left, rt.getLocalBounds().top) + rt.getPosition());
 			}
         }
+		
+		rect.setSize(sf::Vector2f(limit, rt.getLocalBounds().height));
+		rect.setPosition(sf::Vector2f(rt.getLocalBounds().left, rt.getLocalBounds().top) + rt.getPosition());
 
         window.clear(sf::Color::Black);
 		window.draw(rect);

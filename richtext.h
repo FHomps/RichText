@@ -28,7 +28,7 @@ public:
 	
 	void setHorizontalLimit(float limit);
 	
-	void setCharacterLimit(size_t limit, bool ignoreTags = true);
+	void setCharacterLimit(size_t limit);
 	
 	sf::String const& getString() const;
 	
@@ -74,7 +74,10 @@ private:
 	
 	void ensureGeometryUpdate() const;
 	
+	void ensurePDVUpdate() const;
+	
 	sf::String m_string;
+	mutable size_t m_displayableCharacters = 0;
 	sf::Font const* m_font;
 	
 	uint m_characterSize;
@@ -82,15 +85,21 @@ private:
 	float m_horizontalLimit = std::numeric_limits<float>::infinity();
 	
 	size_t m_characterLimit = std::numeric_limits<size_t>::max();
-	bool m_characterLimitIgnoresTags = true;
 	
 	mutable sf::VertexArray m_vertices;
 	mutable sf::VertexArray m_lineVertices;
+	mutable std::vector<size_t> m_displayedLineCorrespondingToLine;
 	mutable sf::VertexArray m_outlineVertices;
+	mutable std::vector<float> m_displayedCharacterCorrespondingToOutline;
+	mutable sf::VertexArray m_lineOutlineVertices;
+	mutable std::vector<size_t> m_displayedLineCorrespondingToLineOutline;
 	mutable sf::FloatRect m_bounds;
 	
-	mutable bool m_geometryNeedsUpdate;	
+	mutable bool m_geometryNeedsUpdate;
 	
+	mutable std::vector<size_t> m_lastDisplayedCharacterInLine;
+	mutable sf::VertexArray m_partialDisplayVertices;
+	mutable bool m_pDVNeedsUpdate;	
 };
 
 #endif // RICHTEXT_H
