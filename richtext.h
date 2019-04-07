@@ -74,7 +74,7 @@ private:
 	
 	void ensureGeometryUpdate() const;
 	
-	void ensurePDVUpdate() const;
+	void ensurePartialDisplayUpdate() const;
 	
 	sf::String m_string;
 	mutable size_t m_displayableCharacters = 0;
@@ -86,20 +86,20 @@ private:
 	
 	size_t m_characterLimit = std::numeric_limits<size_t>::max();
 	
-	mutable sf::VertexArray m_vertices;
+	mutable sf::VertexArray m_charVertices;
 	mutable sf::VertexArray m_lineVertices;
-	mutable std::vector<size_t> m_displayedLineCorrespondingToLine;
-	mutable sf::VertexArray m_outlineVertices;
-	mutable std::vector<float> m_displayedCharacterCorrespondingToOutline;
+	mutable std::vector<size_t> m_lineNumberOfLine;
+	mutable sf::VertexArray m_charOutlineVertices;
+	mutable std::vector<float> m_charNumberOfCharOutline;
 	mutable sf::VertexArray m_lineOutlineVertices;
-	mutable std::vector<size_t> m_displayedLineCorrespondingToLineOutline;
+	mutable std::vector<size_t> m_charNumberOfLineOutline;
 	mutable sf::FloatRect m_bounds;
 	
 	mutable bool m_geometryNeedsUpdate;
 	
-	mutable std::vector<size_t> m_lastDisplayedCharacterInLine;
+	mutable std::vector<size_t> m_lastCharNumberInLine;
 	mutable sf::VertexArray m_partialDisplayVertices;
-	mutable bool m_pDVNeedsUpdate;	
+	mutable bool m_partialDisplayNeedsUpdate;	
 };
 
 #endif // RICHTEXT_H
