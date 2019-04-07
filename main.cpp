@@ -19,7 +19,7 @@ int main() {
 	rt.setHorizontalLimit(limit);
 	rt.setDefaultFillColor(sf::Color::White);
 	rt.setPosition(50, 50);
-	size_t charLimit = 186;
+	size_t charLimit = 50;
 	rt.setCharacterLimit(charLimit);
 			
 	sf::RectangleShape rect(sf::Vector2f(limit, rt.getLocalBounds().height));
