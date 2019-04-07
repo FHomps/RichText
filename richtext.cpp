@@ -76,7 +76,7 @@ void RichText::setDefaultStyle(sf::Uint32 style) {
 }
 
 void RichText::setHorizontalLimit(float limit) {
-	m_horizontalLimit = limit;
+	m_horizontalLimit = fmaxf(0, limit);
 	m_geometryNeedsUpdate = true;
 }
 
@@ -91,15 +91,15 @@ sf::Font const* RichText::getFont() const { return m_font; }
 
 unsigned int RichText::getCharacterSize() const { return m_characterSize; }
 
-float RichText::getBaseLetterSpacing() const { return m_dLetterSpacingFactor; }
+float RichText::getDefaultLetterSpacing() const { return m_dLetterSpacingFactor; }
 
-float RichText::getBaseLineSpacing() const { return m_dLineSpacingFactor; }
+float RichText::getDefaultLineSpacing() const { return m_dLineSpacingFactor; }
 
-sf::Color const& RichText::getBaseFillColor() const { return m_dFillColor; }
+sf::Color const& RichText::getDefaultFillColor() const { return m_dFillColor; }
 
-sf::Color const& RichText::getBaseOutlineColor() const { return m_dOutlineColor; }
+sf::Color const& RichText::getDefaultOutlineColor() const { return m_dOutlineColor; }
 
-float RichText::getBaseOutlineThickness() const { return m_dOutlineThickness; }
+float RichText::getDefaultOutlineThickness() const { return m_dOutlineThickness; }
 
 sf::Uint32 RichText::getDefaultStyle() const {
 	sf::Uint32 style = sf::Text::Regular;

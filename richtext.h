@@ -36,15 +36,15 @@ public:
 	
 	unsigned int getCharacterSize() const;
 	
-	float getBaseLetterSpacing() const;
+	float getDefaultLetterSpacing() const;
 	
-	float getBaseLineSpacing() const;
+	float getDefaultLineSpacing() const;
 	
-	sf::Color const& getBaseFillColor() const;
+	sf::Color const& getDefaultFillColor() const;
 	
-	sf::Color const& getBaseOutlineColor() const;
+	sf::Color const& getDefaultOutlineColor() const;
 	
-	float getBaseOutlineThickness() const;
+	float getDefaultOutlineThickness() const;
 	
 	sf::Uint32 getDefaultStyle() const;
 	
