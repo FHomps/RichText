@@ -1,6 +1,8 @@
 #include "richtext.h"
 #include <stack>
 #include <cmath>
+#include <functional>
+#include <iostream>
 
 RichText::RichText() :
 	m_charVertices				(sf::Triangles),
@@ -218,7 +220,7 @@ void RichText::ensureGeometryUpdate() const {
 	m_lineOutlineVertices.clear();
 	m_lineNumberOfLine.clear();
 	m_charNumberOfCharOutline.clear();
-	m_charNumberOfLineOutline.clear();
+	m_lineNumberOfLineOutline.clear();
 	m_lastCharNumberInLine.clear();
 	
 	bool bold = m_dBold;
@@ -252,58 +254,45 @@ void RichText::ensureGeometryUpdate() const {
 	sf::Vector2f strikeThroughOutlineStart = strikeThroughStart;
 	
 	sf::Uint32 prevChar = 0;
-	
-	struct Word {
-		Word(RichText const& rt) : rt(rt) {}
-	public:
-		void setStartCharacteristics(float const& lineSpacing, float const& outlineThickness, float const& whitespaceWidth) {
-			lineSpacingAtStart = lineSpacing;
-			lineSpacingAtStart = lineSpacing;
-			outlineThicknessAtStart = outlineThickness;
-			whitespaceWidthAtStart = whitespaceWidth;
-		}
-		
-		void addToText(size_t const& currentLine) {
-			for (size_t i = 0; i < charVertices.getVertexCount(); i++)
-				rt.m_charVertices.append(charVertices[i]);
-			charVertices.clear();
-			for (size_t i = 0; i < lineVertices.getVertexCount(); i+=6) {
-				rt.m_lineNumberOfLine.push_back(currentLine);
-				for (size_t j = i; j < i+6; j++)
-					rt.m_lineVertices.append(lineVertices[j]);
-			}
-			lineVertices.clear();
-			for (size_t i = 0; i < charOutlineVertices.getVertexCount(); i++)
-				rt.m_charOutlineVertices.append(charOutlineVertices[i]);
-			charOutlineVertices.clear();
-			for (size_t i = 0; i < lineOutlineVertices.getVertexCount(); i+=6) {
-				rt.m_charNumberOfLineOutline.push_back(currentLine);
-				for (size_t j = i; j < i+6; j++)
-					rt.m_lineOutlineVertices.append(lineOutlineVertices[j]);
-			}
-			lineOutlineVertices.clear();	
-		}
-		
-		sf::VertexArray charVertices = sf::VertexArray(sf::Triangles);
-		sf::VertexArray lineVertices  = sf::VertexArray(sf::Triangles);
-		sf::VertexArray charOutlineVertices  = sf::VertexArray(sf::Triangles);
-		sf::VertexArray lineOutlineVertices  = sf::VertexArray(sf::Triangles);
-		
-		float lineSpacingAtStart;
-		float outlineThicknessAtStart;
-		float whitespaceWidthAtStart;
-		
-	private:
-		friend class RichText;
-		RichText const& rt;
-	} w(*this);
-	
-	w.setStartCharacteristics(lineSpacings.top(), outlineThicknesses.top(), whitespaceWidth);
-	
 	float currentLineWidth = 0;
-	
 	size_t currentDisplayedCharacter = 0;
 	size_t currentLine = 0;
+	
+	sf::VertexArray wordCharVertices = sf::VertexArray(sf::Triangles);
+	sf::VertexArray wordLineVertices  = sf::VertexArray(sf::Triangles);
+	sf::VertexArray wordCharOutlineVertices  = sf::VertexArray(sf::Triangles);
+	sf::VertexArray wordLineOutlineVertices  = sf::VertexArray(sf::Triangles);
+	
+	float lineSpacingAtWordStart = lineSpacings.top();
+	float outlineThicknessAtWordStart = outlineThicknesses.top();
+	float whitespaceWidthAtWordStart = whitespaceWidth;
+	
+	std::function<void()> addWordToText = [&]() { 
+		for (size_t i = 0; i < wordCharVertices.getVertexCount(); i++)
+			m_charVertices.append(wordCharVertices[i]);
+		wordCharVertices.clear();
+		for (size_t i = 0; i < wordLineVertices.getVertexCount(); i+=6) {
+			m_lineNumberOfLine.push_back(currentLine);
+			for (size_t j = i; j < i+6; j++)
+				m_lineVertices.append(wordLineVertices[j]);
+		}
+		wordLineVertices.clear();
+		for (size_t i = 0; i < wordCharOutlineVertices.getVertexCount(); i++)
+			m_charOutlineVertices.append(wordCharOutlineVertices[i]);
+		wordCharOutlineVertices.clear();
+		for (size_t i = 0; i < wordLineOutlineVertices.getVertexCount(); i+=6) {
+			m_lineNumberOfLineOutline.push_back(currentLine);
+			for (size_t j = i; j < i+6; j++)
+				m_lineOutlineVertices.append(wordLineOutlineVertices[j]);
+		}
+		wordLineOutlineVertices.clear();	
+	};
+	
+	std::function<void()> resetWordStart = [&]() {
+		lineSpacingAtWordStart = lineSpacings.top();
+		outlineThicknessAtWordStart = outlineThicknesses.top();
+		whitespaceWidthAtWordStart = whitespaceWidth;
+	};
 	
 	size_t i = 0;
 	size_t len = m_string.getSize();
@@ -340,9 +329,9 @@ void RichText::ensureGeometryUpdate() const {
 						break;
 					case 'u':
 						if (underlined && ending) {
-							addLine(w.lineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
+							addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
 							if (hasOutline) {
-								addLine(w.lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+								addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 							}
 						}
 						underlined = !ending;
@@ -354,9 +343,9 @@ void RichText::ensureGeometryUpdate() const {
 						break;
 					case 's':
 						if (strikeThrough && ending) {
-							addLine(w.lineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
+							addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
 							if (hasOutline) {
-								addLine(w.lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+								addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 							}
 						}
 						strikeThrough = !ending;
@@ -369,12 +358,12 @@ void RichText::ensureGeometryUpdate() const {
 					case 'c':
 						if (ending && fillColors.size() > 1) {
 							if (underlined) {
-								addLine(w.lineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
+								addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
 								underlineStart.x = pos.x;
 							}
 							
 							if (strikeThrough) {
-								addLine(w.lineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
+								addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
 								strikeThroughStart.x = pos.x;
 							}
 							
@@ -394,11 +383,11 @@ void RichText::ensureGeometryUpdate() const {
 					if (ending && fullTag.compare("oc") == 0 && outlineColors.size() > 1) {
 						if (hasOutline) {
 							if (underlined) {
-								addLine(w.lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+								addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 								underlineOutlineStart.x = pos.x;
 							}
 							if (strikeThrough) {
-								addLine(w.lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+								addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 								strikeThroughOutlineStart.x = pos.x;
 							}
 						}
@@ -410,11 +399,11 @@ void RichText::ensureGeometryUpdate() const {
 						lineSpacings.pop();
 					else if (ending && fullTag.compare("ot") == 0 && outlineThicknesses.size() > 1) {
 						if (underlined) {
-							addLine(w.lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+							addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 							underlineOutlineStart.x = pos.x;
 						}
 						if (strikeThrough) {
-							addLine(w.lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+							addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 							strikeThroughOutlineStart.x = pos.x;
 						}
 						outlineThicknesses.pop();
@@ -434,12 +423,12 @@ void RichText::ensureGeometryUpdate() const {
 					switch(tag[0]) {
 					case 'c': {
 						if (underlined) {
-							addLine(w.lineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
+							addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
 							underlineStart.x = pos.x;
 						}
 						
 						if (strikeThrough) {
-							addLine(w.lineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
+							addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
 							strikeThroughStart.x = pos.x;
 						}
 						if (arg[0] == '#') { //Hexcode color
@@ -469,11 +458,11 @@ void RichText::ensureGeometryUpdate() const {
 					if (tag.compare("oc") == 0) {
 						if (hasOutline) {
 							if (underlined) {
-								addLine(w.lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+								addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 								underlineOutlineStart.x = pos.x;
 							}
 							if (strikeThrough) {
-								addLine(w.lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+								addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 								strikeThroughOutlineStart.x = pos.x;
 							}
 						}
@@ -532,10 +521,10 @@ void RichText::ensureGeometryUpdate() const {
 						if (j == arg.size()) {
 							if (hasOutline) {
 								if (underlined) {
-									addLine(w.lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+									addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 								}
 								if (strikeThrough) {
-									addLine(w.lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
+									addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
 								}
 							}
 							
@@ -558,16 +547,16 @@ void RichText::ensureGeometryUpdate() const {
 			break;
 		}
 		case ' ': {			
-			w.addToText(currentLine);
-			w.setStartCharacteristics(lineSpacings.top(), outlineThicknesses.top(), whitespaceWidth);
+			addWordToText();
+			resetWordStart();
 			
 			currentLineWidth = pos.x;
 			pos.x += whitespaceWidth;
 			break;
 		}
 		case '\t': {
-			w.addToText(currentLine);
-			w.setStartCharacteristics(lineSpacings.top(), outlineThicknesses.top(), whitespaceWidth);
+			addWordToText();
+			resetWordStart();
 			
 			currentLineWidth = pos.x;
 			
@@ -576,15 +565,15 @@ void RichText::ensureGeometryUpdate() const {
 			break;
 		}
 		case '\n': {
-			w.addToText(currentLine);
-			w.setStartCharacteristics(lineSpacings.top(), outlineThicknesses.top(), whitespaceWidth);
+			addWordToText();
+			resetWordStart();
 			
 			if (underlined) {
 				addLine(m_lineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
 				m_lineNumberOfLine.push_back(currentLine);
 				if (hasOutline) {
 					addLine(m_lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_charNumberOfLineOutline.push_back(currentLine);
+					m_lineNumberOfLineOutline.push_back(currentLine);
 				}
 			}
 			if (strikeThrough) {
@@ -592,7 +581,7 @@ void RichText::ensureGeometryUpdate() const {
 				m_lineNumberOfLine.push_back(currentLine);
 				if (hasOutline) {
 					addLine(m_lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_charNumberOfLineOutline.push_back(currentLine);
+					m_lineNumberOfLineOutline.push_back(currentLine);
 				}
 			}
 			pos.x = 0;
@@ -618,10 +607,10 @@ void RichText::ensureGeometryUpdate() const {
 			if (outlineThicknesses.top() != 0.f) {
 				m_charNumberOfCharOutline.push_back(currentDisplayedCharacter);
 				sf::Glyph const& go = m_font->getGlyph(m_string[i], m_characterSize, bold, outlineThicknesses.top());
-				addGlyphQuad(w.charOutlineVertices, pos, outlineColors.top(), go, italic ? 0.209f : 0, outlineThicknesses.top());
+				addGlyphQuad(wordCharOutlineVertices, pos, outlineColors.top(), go, italic ? 0.209f : 0, outlineThicknesses.top());
 			}
 			sf::Glyph const& g = m_font->getGlyph(m_string[i], m_characterSize, bold);
-			addGlyphQuad(w.charVertices, pos, fillColors.top(), g, italic ? 0.209f : 0);
+			addGlyphQuad(wordCharVertices, pos, fillColors.top(), g, italic ? 0.209f : 0);
 			
 			pos.x += g.advance + letterSpacings.top();
 			currentDisplayedCharacter += 1;
@@ -629,8 +618,8 @@ void RichText::ensureGeometryUpdate() const {
 			
 			//Move the word down a line if it became too long
 			if (currentLineWidth != 0.f && pos.x > m_horizontalLimit) {
-				float extendedLineWidth = currentLineWidth + w.whitespaceWidthAtStart;
-				sf::Vector2f wordMovement(-extendedLineWidth, w.lineSpacingAtStart);
+				float extendedLineWidth = currentLineWidth + whitespaceWidthAtWordStart;
+				sf::Vector2f wordMovement(-extendedLineWidth, lineSpacingAtWordStart);
 								
 				//If a line was in progress and started before the word, finish it before moving on
 				if (underlined && underlineStart.x < currentLineWidth) {
@@ -640,7 +629,7 @@ void RichText::ensureGeometryUpdate() const {
 				}
 				if (hasOutline && underlined && underlineOutlineStart.x < currentLineWidth) {
 					addLine(m_lineOutlineVertices, underlineOutlineStart, currentLineWidth - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_charNumberOfLineOutline.push_back(currentLine);
+					m_lineNumberOfLineOutline.push_back(currentLine);
 					underlineOutlineStart.x = extendedLineWidth;
 				}
 				if (strikeThrough && strikeThroughStart.x < currentLineWidth) {
@@ -650,52 +639,52 @@ void RichText::ensureGeometryUpdate() const {
 				}
 				if (hasOutline && strikeThrough && strikeThroughOutlineStart.x < currentLineWidth) {
 					addLine(m_lineOutlineVertices, strikeThroughOutlineStart, currentLineWidth - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_charNumberOfLineOutline.push_back(currentLine);
+					m_lineNumberOfLineOutline.push_back(currentLine);
 					strikeThroughOutlineStart.x = extendedLineWidth;
 				}
 				
 				//If any finished line in the word stemmed from before it, cut it in half at the start of the word (one half will stay, the other will move with the word)
-				for (size_t i = 0; i < w.lineVertices.getVertexCount(); i += 6) {
-					if (w.lineVertices[i].position.x <= currentLineWidth) {
+				for (size_t i = 0; i < wordLineVertices.getVertexCount(); i += 6) {
+					if (wordLineVertices[i].position.x <= currentLineWidth) {
 						for (size_t j = 0; j < 6; j++) {
-							sf::Vertex v = w.lineVertices[i+j];
+							sf::Vertex v = wordLineVertices[i+j];
 							if (j == 1 || j == 4 || j == 5) //Shorten the end of the first half, which will stay on the line
 								v.position.x = currentLineWidth;
 							else
-								w.lineVertices[i+j].position.x = extendedLineWidth; //Push the beginning of the second, which will go down with the word afterwards
+								wordLineVertices[i+j].position.x = extendedLineWidth; //Push the beginning of the second, which will go down with the word afterwards
 							m_lineVertices.append(v);
 						}
 						m_lineNumberOfLine.push_back(currentLine);
 					}
 					
 					for (size_t j = i; j < i+6; j++) {
-						w.lineVertices[j].position += wordMovement;
+						wordLineVertices[j].position += wordMovement;
 					}
 				}
-				for (size_t i = 0; i < w.lineOutlineVertices.getVertexCount(); i += 6) {
-					if (w.lineOutlineVertices[i].position.x + w.outlineThicknessAtStart <= currentLineWidth) {
+				for (size_t i = 0; i < wordLineOutlineVertices.getVertexCount(); i += 6) {
+					if (wordLineOutlineVertices[i].position.x + outlineThicknessAtWordStart <= currentLineWidth) {
 						for (size_t j = 0; j < 6; j++) {
-							sf::Vertex v = w.lineOutlineVertices[i+j];
+							sf::Vertex v = wordLineOutlineVertices[i+j];
 							
 							if (j == 1 || j == 4 || j == 5)
-								v.position.x = currentLineWidth + w.outlineThicknessAtStart;
+								v.position.x = currentLineWidth + outlineThicknessAtWordStart;
 							else
-								w.lineOutlineVertices[i+j].position.x = extendedLineWidth - w.outlineThicknessAtStart;
+								wordLineOutlineVertices[i+j].position.x = extendedLineWidth - outlineThicknessAtWordStart;
 							m_lineOutlineVertices.append(v);
 						}
-						m_charNumberOfLineOutline.push_back(currentLine);
+						m_lineNumberOfLineOutline.push_back(currentLine);
 					}
 					
 					for (size_t j = i; j < i+6; j++) {
-						w.lineOutlineVertices[j].position += wordMovement;
+						wordLineOutlineVertices[j].position += wordMovement;
 					}
 				}
 				
-				for (size_t i = 0; i < w.charVertices.getVertexCount(); i++) {
-					w.charVertices[i].position += wordMovement;
+				for (size_t i = 0; i < wordCharVertices.getVertexCount(); i++) {
+					wordCharVertices[i].position += wordMovement;
 				}
-				for (size_t i = 0; i < w.charOutlineVertices.getVertexCount(); i++) {
-					w.charOutlineVertices[i].position += wordMovement;
+				for (size_t i = 0; i < wordCharOutlineVertices.getVertexCount(); i++) {
+					wordCharOutlineVertices[i].position += wordMovement;
 				}
 				
 				pos += wordMovement;
@@ -704,7 +693,7 @@ void RichText::ensureGeometryUpdate() const {
 				strikeThroughStart += wordMovement;
 				strikeThroughOutlineStart += wordMovement;
 				
-				m_lastCharNumberInLine.push_back(currentDisplayedCharacter - w.charVertices.getVertexCount() / 6);
+				m_lastCharNumberInLine.push_back(currentDisplayedCharacter - wordCharVertices.getVertexCount() / 6);
 				currentLine++;
 				
 				currentLineWidth = 0;
@@ -723,7 +712,7 @@ void RichText::ensureGeometryUpdate() const {
 		m_lineNumberOfLine.push_back(currentLine);
 		if (hasOutline) {
 			addLine(m_lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-			m_charNumberOfLineOutline.push_back(currentLine);
+			m_lineNumberOfLineOutline.push_back(currentLine);
 		}
 	}
 	if (strikeThrough) {
@@ -731,12 +720,12 @@ void RichText::ensureGeometryUpdate() const {
 		m_lineNumberOfLine.push_back(currentLine);
 		if (hasOutline) {
 			addLine(m_lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-			m_charNumberOfLineOutline.push_back(currentLine);
+			m_lineNumberOfLineOutline.push_back(currentLine);
 		}
 	}
 	
 	//Add the last word
-	w.addToText(currentLine);
+	addWordToText();
 	
 	//Compute bounds; in a square of 6 vertices, the first one is the upper left and the last one the bottom right
 	float minX = std::numeric_limits<float>::infinity(), minY = std::numeric_limits<float>::infinity(),
@@ -783,14 +772,14 @@ void RichText::ensurePartialDisplayUpdate() const {
 	
 	//Determine the line of the character limit
 	size_t line = 0;
-	while (m_lastCharNumberInLine[line] < m_characterLimit)
+	while (line < m_lastCharNumberInLine.size() && m_lastCharNumberInLine[line] < m_characterLimit)
 		line++;
 	
 	float rightLimit = m_charVertices[(m_characterLimit-1)*6+5].position.x;
 	float addedLineWidth = 1.f;
 	
 	for (size_t i = 0; i < m_lineOutlineVertices.getVertexCount(); i+=6) {
-		size_t lineLine = m_charNumberOfLineOutline[i/6];
+		size_t lineLine = m_lineNumberOfLineOutline[i/6];
 		if (lineLine < line) {
 			for (size_t j = i; j < i+6; j++)
 				m_partialDisplayVertices.append(m_lineOutlineVertices[j]);
@@ -830,6 +819,7 @@ void RichText::ensurePartialDisplayUpdate() const {
 				m_partialDisplayVertices[k-1].position.x = rightLimit + addedLineWidth;
 			}
 		}
+		else { break; }
 	}	
 	
 	m_partialDisplayNeedsUpdate = false;

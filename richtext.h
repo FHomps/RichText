@@ -92,7 +92,7 @@ private:
 	mutable sf::VertexArray m_charOutlineVertices;
 	mutable std::vector<float> m_charNumberOfCharOutline;
 	mutable sf::VertexArray m_lineOutlineVertices;
-	mutable std::vector<size_t> m_charNumberOfLineOutline;
+	mutable std::vector<size_t> m_lineNumberOfLineOutline;
 	mutable sf::FloatRect m_bounds;
 	
 	mutable bool m_geometryNeedsUpdate;

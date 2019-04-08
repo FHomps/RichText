@@ -15,11 +15,11 @@ int main() {
 	sf::String str("This is normal text. Here co<u>Mes underlined. Outlines th<ot=2,oc=#000000>En arrive. Fancy co<c=#FF0000>Lor<oc=#00FF00>S, too. A line pa\nSses. It brings sp<lts=3,lns=1.1>Acing. Now strik<s>Ethrough joins, and underlined lea</u>Ves. No more c</c>Olo</oc>Rs. No more out</ot,/oc>Lines either. A line pass\nEs, and the spa</lts,/lns>Cing ends. Finally striket</s>Hrough leaves.");
 	rt.setString(str);
 	rt.setFont(font);
-	float limit = 230;
+	float limit = 300;
 	rt.setHorizontalLimit(limit);
 	rt.setDefaultFillColor(sf::Color::White);
 	rt.setPosition(50, 50);
-	size_t charLimit = 50;
+	size_t charLimit = 200;
 	rt.setCharacterLimit(charLimit);
 			
 	sf::RectangleShape rect(sf::Vector2f(limit, rt.getLocalBounds().height));
