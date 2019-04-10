@@ -601,7 +601,10 @@ void RichText::ensureGeometryUpdate() const {
 		}
 		case '\r':
 			break;
-		default: {			
+		default: {
+			if (m_string[i] == '\\' && i < len-1)
+				i++;
+			
 			pos.x += m_font->getKerning(prevChar, m_string[i], m_characterSize);
 			
 			if (outlineThicknesses.top() != 0.f) {
