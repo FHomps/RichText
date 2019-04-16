@@ -1,61 +1,90 @@
 #include <SFML/Graphics.hpp>
 #include "richtext.h"
+#include <functional>
 
-int main() {	
-    sf::RenderWindow window(sf::VideoMode(1200, 600), "SFML Project", sf::Style::Close);
+int main() {
+
+    sf::RenderWindow window(sf::VideoMode(800, 600), "SFML Project", sf::Style::Close);
     window.setFramerateLimit(60);
 
     sf::Event haps;
-	
+
 	sf::Font font;
 	font.loadFromFile("Resources/OpenSans.ttf");
 	
-	RichText rt;
-	rt.setCharacterSize(20);
-	sf::String str("This is normal text. Here co<u>Mes underlined. Outlines th<ot=2,oc=#000000>En arrive. Fancy co<c=#FF0000>Lor<oc=#00FF00>S, too. A line pa\nSses. It brings sp<lts=3,lns=1.1>Acing. Now strik<s>Ethrough joins, and underlined lea</u>Ves. No more c</c>Olo</oc>Rs. No more out</ot,/oc>Lines either. A line pass\nEs, and the spa</lts,/lns>Cing ends. Finally striket</s>Hrough leaves.");
-	rt.setString(str);
-	rt.setFont(font);
-	float limit = 300;
-	rt.setHorizontalLimit(limit);
-	rt.setDefaultFillColor(sf::Color::White);
-	rt.setPosition(50, 50);
-	size_t charLimit = 200;
-	rt.setCharacterLimit(charLimit);
-			
-	sf::RectangleShape rect(sf::Vector2f(limit, rt.getLocalBounds().height));
-	rect.setPosition(sf::Vector2f(rt.getLocalBounds().left, rt.getLocalBounds().top) + rt.getPosition());
-	rect.setFillColor(sf::Color::Blue);
+	RichText rt(font, "This is normal text. Here co<u>Mes underlined. Outlines th<ot=2>En arrive. Fancy co<c=red,id=0>Lors, too. They can cha<oc=green,id=1>Nge through pressing Return. A line pa\nSses. It brings sp<lts=3,lns=1.1>Acing. Now strik<s,id=1>Ethrough joins - it can change too -, and underlined lea</u>Ves. No more c</c>Olo</oc>Rs. No more </ot,/oc>Outlines either. A line pass\nEs, and the spa</lts,/lns>Cing ends. Finally striket</s>Hrough leaves. Two li\n\nNes pass. It ends here. An extension can be added by pressing X.\n", 25);
+	bool state = 0;
+	float horizontalLimit = 600;
+	rt.setHorizontalLimit(horizontalLimit);
+	rt.setCharacterLimit(200);
+	
+	size_t highlighted = 0;
+	sf::RectangleShape highlightRect;
+	highlightRect.setFillColor(sf::Color::Yellow);
+	sf::FloatRect charBounds = rt.findCharacterBounds(highlighted);
+	highlightRect.setPosition(charBounds.left, charBounds.top);
+	highlightRect.setSize(sf::Vector2f(charBounds.width, charBounds.height));
+	
+	sf::RectangleShape boundsRect;
+	boundsRect.setFillColor(sf::Color::Blue);
+	sf::FloatRect bounds = rt.getLocalBounds();
+	boundsRect.setPosition(bounds.left, bounds.top);
+	boundsRect.setSize(sf::Vector2f(bounds.width, bounds.height));
 	
     while (window.isOpen()) {
         while (window.pollEvent(haps)) {
             if (haps.type == sf::Event::Closed)
                 window.close();
-			else if (haps.type == sf::Event::KeyPressed) {
-				if (haps.key.code == sf::Keyboard::Space) {
-					charLimit++;
-					rt.setCharacterLimit(charLimit);
+			if (haps.type ==  sf::Event::KeyPressed) {
+				switch (haps.key.code) {
+				case sf::Keyboard::Return: {
+					rt.setFillColor(0, state ? sf::Color::Red : sf::Color::Green);
+					rt.setOutlineColor(1, state ? sf::Color::Green : sf::Color::Red);
+					rt.setStyle(1, state ? sf::Text::StrikeThrough : sf::Text::Regular);
+					state = !state;
+					break;
 				}
-				else if (haps.key.code == sf::Keyboard::BackSpace) {
-					charLimit--;
-					rt.setCharacterLimit(charLimit);
+				case sf::Keyboard::O:
+					highlighted -= std::min(highlighted, size_t(1));
+					charBounds = rt.findCharacterBounds(highlighted);
+					highlightRect.setPosition(charBounds.left, charBounds.top);
+					highlightRect.setSize(sf::Vector2f(charBounds.width, charBounds.height));
+					break;
+				case sf::Keyboard::P:
+					highlighted++;
+					charBounds = rt.findCharacterBounds(highlighted);
+					highlightRect.setPosition(charBounds.left, charBounds.top);
+					highlightRect.setSize(sf::Vector2f(charBounds.width, charBounds.height));
+					break;
+				case sf::Keyboard::Left: {
+					rt.setCharacterLimit(rt.getCharacterLimit() - std::min(rt.getCharacterLimit(), size_t(1)));
+					break;
+				case sf::Keyboard::Right:
+					rt.setCharacterLimit(rt.getCharacterLimit()+1);
+					break;	
 				}
-			}
-			else if (haps.type == sf::Event::MouseButtonPressed) {
-				if (haps.mouseButton.button == sf::Mouse::Left)
-					limit += 20;
-				else if (haps.mouseButton.button == sf::Mouse::Right) {
-					limit -= 20;
+				case sf::Keyboard::PageDown:
+					rt.setCharacterLimit(rt.getMaxEffectiveCharacterLimit());
+					break;
+				case sf::Keyboard::PageUp:
+					rt.setCharacterLimit(0);
+					break;
+				case sf::Keyboard::X:
+					rt.parseString("Another extension can be added by pressing X. ", true);
+					break;
+				default:
+					break;				
 				}
-				rt.setHorizontalLimit(limit);
+				bounds = rt.getLocalBounds();
+				boundsRect.setPosition(bounds.left, bounds.top);
+				boundsRect.setSize(sf::Vector2f(bounds.width, bounds.height));
 			}
         }
-		
-		rect.setSize(sf::Vector2f(limit, rt.getLocalBounds().height));
-		rect.setPosition(sf::Vector2f(rt.getLocalBounds().left, rt.getLocalBounds().top) + rt.getPosition());
 
-        window.clear(sf::Color::Black);
-		window.draw(rect);
+        window.clear(sf::Color::Magenta);
+		window.draw(boundsRect);
+		window.draw(highlightRect);
 		window.draw(rt);
-	    window.display();
+        window.display();
     }
 }

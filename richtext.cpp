@@ -1,138 +1,629 @@
 #include "richtext.h"
-#include <stack>
-#include <cmath>
+#include <string>
+#include <unordered_map>
 #include <functional>
-#include <iostream>
+#include <cmath>
 
 RichText::RichText() :
-	m_charVertices				(sf::Triangles),
-	m_lineVertices			(sf::Triangles),
-	m_charOutlineVertices		(sf::Triangles),
-	m_lineOutlineVertices	(sf::Triangles),
-	m_geometryNeedsUpdate	(false),
-	m_partialDisplayVertices(sf::Triangles)
+	m_font(nullptr),
+	m_characterSize(20),
+	m_charVertices(sf::Triangles),
+	m_charOutlineVertices(sf::Triangles),
+	m_lineVertices(sf::Triangles),
+	m_lineOutlineVertices(sf::Triangles),
+	m_shouldUpdateVertices(false)
 {
 }
 
-RichText::RichText(sf::String const& string, sf::Font const& font, unsigned int characterSize) :
-	m_string				(string),
-	m_font					(&font),
-	m_characterSize			(characterSize),
-	m_charVertices				(sf::Triangles),
-	m_lineVertices			(sf::Triangles),
-	m_charOutlineVertices		(sf::Triangles),
-	m_lineOutlineVertices	(sf::Triangles),
-	m_geometryNeedsUpdate	(true),
-	m_partialDisplayVertices(sf::Triangles)
+RichText::RichText(sf::Font const& font, sf::String const& string, uint characterSize) :
+	m_font(&font),
+	m_characterSize(characterSize),
+	m_charVertices(sf::Triangles),
+	m_charOutlineVertices(sf::Triangles),
+	m_lineVertices(sf::Triangles),
+	m_lineOutlineVertices(sf::Triangles),
+	m_shouldUpdateVertices(true)
 {
+	initializeLineStarts();
+	parseString(string);
 }
 
-void RichText::setString(sf::String const& string) {
-	m_string = string;
-	m_geometryNeedsUpdate = true;
+RichText::~RichText() {
+	for (auto it = m_stylizers.begin(); it != m_stylizers.end(); it++)
+		delete it->second;
 }
 
-void RichText::setFont(sf::Font const& font) {
-	if (m_font != &font) {
-		m_font = &font;
-		m_geometryNeedsUpdate = true;
+void RichText::parseString(sf::String const& s, bool append) {
+	const std::unordered_map<std::string, Stylizer::StyleProperty> tagMap {
+		{"b", Stylizer::Bold},
+		{"i", Stylizer::Italic},
+		{"u", Stylizer::Underlined},
+		{"s", Stylizer::StrikeThrough},
+		{"c", Stylizer::FillColor},
+		{"ot", Stylizer::OutlineThickness},
+		{"oc", Stylizer::OutlineColor},
+		{"lts", Stylizer::LetterSpacing},
+		{"lns", Stylizer::LineSpacing}
+	};
+	
+	const std::unordered_map<std::string, sf::Color> colorMap {
+		{"black", sf::Color::Black},
+		{"white", sf::Color::White},
+		{"red", sf::Color::Red},
+		{"green", sf::Color::Green},
+		{"blue", sf::Color::Blue},
+		{"yellow", sf::Color::Yellow},
+		{"magenta", sf::Color::Magenta},
+		{"cyan", sf::Color::Cyan},
+		{"transparent", sf::Color::Transparent}
+	};
+	
+	m_shouldUpdateVertices = true;
+	
+	if (!append) {
+		m_string.clear();
+		for (auto it = m_stylizers.begin(); it != m_stylizers.end(); it++)
+			delete it->second;
+		m_stylizers.clear();
+		m_modifiableStylizers.clear();
+		
+		m_charVertices.clear();
+		m_lineVertices.clear();
+		m_charOutlineVertices.clear();
+		m_lineOutlineVertices.clear();
+
+		m_totalDisplayableCharacters = 0;
+		
+		m_updateStartLine = 0;
+	}
+	else {
+		m_updateStartLine = std::min(m_lineStart_i.size()-1, m_updateStartLine);
+	}
+	
+	size_t i = 0;
+	size_t true_i = m_string.getSize();
+	size_t i_displayOnly = m_totalDisplayableCharacters;
+	size_t len = s.getSize();
+	while (i < len) {
+		if (s[i] == '<') {
+			std::vector<Stylizer*> stylizers;
+			bool modifiable = false;
+			int ID;
+			
+			size_t tags_end = s.find('>', i+1);
+			sf::String tags = s.substring(i+1, tags_end-i-1);
+			size_t spacePos = tags.find(' ');
+			while (spacePos != sf::String::InvalidPos) {
+				tags.erase(spacePos, 1);
+				spacePos = tags.find(' ');
+			}
+			
+			sf::String fullTag;
+			size_t start = 0;
+			size_t end;
+			do {
+				end = tags.find(',', start);
+				fullTag = tags.substring(start, end-start);
+				size_t argPos = fullTag.find('=');
+				sf::String tag = fullTag.substring(0, argPos);
+				bool ender = (tag.getSize() > 1 && tag[0] == '/');
+				bool inactive = (tag.getSize() > 1 && tag[0] == '!');
+				sf::String arg = (argPos >= fullTag.getSize()-1) ? "" : fullTag.substring(argPos+1);
+				
+				auto it = tagMap.find((ender || inactive) ? tag.substring(1) : tag);
+				if (it != tagMap.end()) {
+					switch (it->second) {
+					case Stylizer::Bold:
+					case Stylizer::Italic:
+					case Stylizer::Underlined:
+					case Stylizer::StrikeThrough:
+						if (ender)
+							stylizers.push_back(new EnderStylizer<bool>(it->second));
+						else if (inactive)
+							stylizers.push_back(new StarterStylizer<bool>(it->second));
+						else
+							stylizers.push_back(new StarterStylizer<bool>(it->second, arg == "0" ? false : true));
+						break;
+					case Stylizer::FillColor:
+					case Stylizer::OutlineColor: {
+						if (ender)
+							stylizers.push_back(new EnderStylizer<sf::Color>(it->second));
+						else if (inactive)
+							stylizers.push_back(new StarterStylizer<sf::Color>(it->second));
+						else {
+							if (arg.getSize() == 0)
+								break;
+							if (arg[0] == '#') { //Hex color
+								long fullCode;
+								size_t j;
+								try {
+									fullCode = std::stol(arg.substring(1).toAnsiString(), &j, 16);
+								} catch (...) {
+									break;
+								}
+								if (j == 6) { //No transparency value
+									stylizers.push_back(new StarterStylizer<sf::Color>(it->second, sf::Color((fullCode >> 16) & 0xFF, (fullCode >> 8) & 0xFF, fullCode & 0xFF)));
+								}
+								else if (j == 8) {
+									stylizers.push_back(new StarterStylizer<sf::Color>(it->second, sf::Color((fullCode >> 24) & 0xFF, (fullCode >> 16) & 0xFF, (fullCode >> 8) & 0xFF, fullCode & 0xFF)));
+								}
+							}
+							else {
+								auto colorIt = colorMap.find(arg);
+								if (colorIt != colorMap.end())
+									stylizers.push_back(new StarterStylizer<sf::Color>(it->second, colorIt->second));
+							}							
+						}
+						break;
+					}
+					case Stylizer::OutlineThickness:
+					case Stylizer::LetterSpacing:
+					case Stylizer::LineSpacing:
+						if (ender)
+							stylizers.push_back(new EnderStylizer<float>(it->second));
+						else if (inactive)
+							stylizers.push_back(new StarterStylizer<float>(it->second));
+						else {
+							if (arg.getSize() == 0)
+								break;
+							float f;
+							size_t j;
+							try {
+								f = std::stof(arg.toAnsiString(), &j);
+							} catch (...) {
+								break;
+							}
+							if (j == arg.getSize()) {
+								stylizers.push_back(new StarterStylizer<float>(it->second, f));
+							}	
+						}
+						break;
+					default:
+						break;
+					}	
+				}
+				else if (tag == "id") {
+					if (arg.getSize() == 0)
+						break;
+					size_t j;
+					int tempID;
+					try {
+						tempID = std::stoi(arg.toAnsiString(), &j);
+					} catch (...) {
+						break;
+					}
+					if (j == arg.getSize()) {
+						modifiable = true;
+						ID = tempID;
+					}
+				}
+				
+				start = end+1;
+			} while (end != sf::String::InvalidPos);
+			
+			for (auto it = stylizers.begin(); it != stylizers.end(); it++) {
+				m_stylizers.emplace(true_i, *it);
+			}
+			
+			if (modifiable) {
+				for (auto it = stylizers.begin(); it != stylizers.end(); it++) {
+					m_modifiableStylizers.emplace(ID, *it);
+				}
+			}
+			
+			i = tags_end;
+		}
+		else if (s[i] != '\r') {
+			if (s[i] == '\\' && i+1 < len)
+				i++;
+			m_string += s[i];
+			true_i++;
+			if (s[i] != ' ' && s[i] != '\n' && s[i] != '\t' && s[i] != '\r')
+				i_displayOnly++;
+		}
+		i++;
+	}
+	
+	m_totalDisplayableCharacters = i_displayOnly;
+}
+
+sf::String const& RichText::getParsedString() const { return m_string; }
+
+void RichText::setFont(const sf::Font &font) {
+	m_font = &font;
+	m_shouldUpdateVertices = true;
+	m_updateStartLine = 0;
+	initializeLineStarts();
+}
+
+void RichText::setCharacterSize(uint size) { 
+	m_characterSize = size;
+	m_shouldUpdateVertices = true;
+	m_updateStartLine = 0;
+	initializeLineStarts();
+}
+
+void RichText::setStyle(sf::Uint32 style) {
+	m_style.bolds.front() = style & sf::Text::Bold;
+	m_style.italics.front() = style & sf::Text::Italic;
+	m_style.underlineds.front() = style & sf::Text::Underlined;
+	m_style.strikeThroughs.front() = style & sf::Text::StrikeThrough;
+	m_updateStartLine = 0;
+	m_shouldUpdateVertices = true;
+}
+
+void RichText::setStyle(int ID, sf::Uint32 style) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		switch (it->second->getType()) {
+		case Stylizer::Bold:
+			static_cast<StarterStylizer<bool>*>(it->second)->setValue(style & sf::Text::Bold);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+			break;
+		case Stylizer::Italic:
+			static_cast<StarterStylizer<bool>*>(it->second)->setValue(style & sf::Text::Italic);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+			break;
+		case Stylizer::Underlined:
+			static_cast<StarterStylizer<bool>*>(it->second)->setValue(style & sf::Text::Underlined);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+			break;
+		case Stylizer::StrikeThrough:
+			static_cast<StarterStylizer<bool>*>(it->second)->setValue(style & sf::Text::StrikeThrough);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+			break;
+		default:
+			break;
+		}
+	}
+	m_shouldUpdateVertices = true;
+}
+
+void RichText::setStyle(int ID, sf::Uint32 style, bool activated) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		switch (it->second->getType()) {
+		case Stylizer::Bold:
+			if (style & sf::Text::Bold) {
+				static_cast<StarterStylizer<bool>*>(it->second)->activated = activated;
+				m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+				m_shouldUpdateVertices = true;
+			}
+			break;
+		case Stylizer::Italic:
+			if (style & sf::Text::Italic) {
+				static_cast<StarterStylizer<bool>*>(it->second)->activated = activated;
+				m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+				m_shouldUpdateVertices = true;
+			}
+			break;
+		case Stylizer::Underlined:
+			if (style & sf::Text::Underlined) {
+				static_cast<StarterStylizer<bool>*>(it->second)->activated = activated;
+				m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+				m_shouldUpdateVertices = true;
+			}
+			break;
+		case Stylizer::StrikeThrough:
+			if (style & sf::Text::StrikeThrough) {
+				static_cast<StarterStylizer<bool>*>(it->second)->activated = activated;
+				m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+				m_shouldUpdateVertices = true;
+			}
+			break;
+		default:
+			break;
+		}
 	}
 }
 
-void RichText::setCharacterSize(unsigned int size) {
-	m_characterSize = size;
-	m_geometryNeedsUpdate = true;
+void RichText::setFillColor(sf::Color color) {
+	m_style.fillColors.front() = color;
+	m_updateStartLine = 0;
+	m_shouldUpdateVertices = true;
 }
 
-void RichText::setDefaultLineSpacing(float spacingFactor) {
-	m_dLineSpacingFactor = spacingFactor;
-	m_geometryNeedsUpdate = true;
+void RichText::setFillColor(int ID, sf::Color color) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::FillColor) {
+			static_cast<StarterStylizer<sf::Color>*>(it->second)->setValue(color);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+		}
+	}
 }
 
-void RichText::setDefaultLetterSpacing(float spacingFactor) {
-	m_dLetterSpacingFactor = spacingFactor;
-	m_geometryNeedsUpdate = true;
+void RichText::setFillColor(int ID, bool activated) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::FillColor) {
+			static_cast<StarterStylizer<sf::Color>*>(it->second)->activated = activated;
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+		}
+	}
 }
 
-void RichText::setDefaultFillColor(sf::Color const& color) {
-	m_dFillColor = color;
-	m_geometryNeedsUpdate = true;
+void RichText::setOutlineThickness(float thickness) {
+	m_style.outlineThicknesses.front() = thickness;
+	m_updateStartLine = 0;
+	m_shouldUpdateVertices = true;
+	
 }
 
-void RichText::setDefaultOutlineColor(sf::Color const& color) {
-	m_dOutlineColor = color;
-	m_geometryNeedsUpdate = true;
+void RichText::setOutlineThickness(int ID, float thickness) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::OutlineThickness) {
+			static_cast<StarterStylizer<float>*>(it->second)->setValue(thickness);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+		}
+	}
 }
 
-void RichText::setDefaultOutlineThickness(float thickness) {
-	m_dOutlineThickness = thickness;
-	m_geometryNeedsUpdate = true;
+void RichText::setOutlineThickness(int ID, bool activated) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::OutlineThickness) {
+			static_cast<StarterStylizer<float>*>(it->second)->activated = activated;
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+		}
+	}
 }
 
-void RichText::setDefaultStyle(sf::Uint32 style) {
-	m_dBold = style & sf::Text::Bold;
-	m_dItalic = style & sf::Text::Italic;
-	m_dUnderlined = style & sf::Text::Underlined;
-	m_dStrikeThrough = style & sf::Text::StrikeThrough;
-	m_geometryNeedsUpdate = true;
+void RichText::setOutlineColor(sf::Color color) {
+	m_style.outlineColors.front() = color;
+	m_updateStartLine = 0;
+	m_shouldUpdateVertices = true;
 }
+
+void RichText::setOutlineColor(int ID, sf::Color color) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::OutlineColor) {
+			static_cast<StarterStylizer<sf::Color>*>(it->second)->setValue(color);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+		}
+	}
+}
+
+void RichText::setOutlineColor(int ID, bool activated) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::OutlineColor) {
+			static_cast<StarterStylizer<sf::Color>*>(it->second)->activated = activated;
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;
+		}
+	}
+}
+
+
+void RichText::setLetterSpacingFactor(float factor) {
+	m_style.letterSpacingFactors.front() = factor;
+	m_updateStartLine = 0;
+	m_shouldUpdateVertices = true;
+}
+
+void RichText::setLetterSpacingFactor(int ID, float factor) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::LetterSpacing) {
+			static_cast<StarterStylizer<float>*>(it->second)->setValue(factor);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;	
+		}
+	}
+}
+
+void RichText::setLetterSpacingFactor(int ID, bool activated) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::LetterSpacing) {
+			static_cast<StarterStylizer<float>*>(it->second)->activated = activated;
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;	
+		}
+	}
+}
+
+void RichText::setLineSpacingFactor(float factor) {
+	m_style.lineSpacingFactors.front() = factor;
+	m_updateStartLine = 0;
+	m_shouldUpdateVertices = true;
+}
+
+void RichText::setLineSpacingFactor(int ID, float factor) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::LineSpacing) {
+			static_cast<StarterStylizer<float>*>(it->second)->setValue(factor);
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;	
+		}
+	}
+}
+
+void RichText::setLineSpacingFactor(int ID, bool activated) {
+	for (auto it = m_modifiableStylizers.find(ID); it != m_modifiableStylizers.end() && it->first == ID; it++) {
+		if (it->second->getType() == Stylizer::LineSpacing) {
+			static_cast<StarterStylizer<float>*>(it->second)->activated = activated;
+			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
+			m_shouldUpdateVertices = true;	
+		}
+	}
+}
+
+uint RichText::getCharacterSize() const { return m_characterSize; }
+sf::Uint32 RichText::getStyle() const {
+	return (m_style.bolds.front() ? sf::Text::Bold : 0)
+			+ (m_style.italics.front() ? sf::Text::Italic : 0)
+			+ (m_style.underlineds.front() ? sf::Text::Underlined : 0)
+			+ (m_style.strikeThroughs.front() ? sf::Text::StrikeThrough : 0);
+}
+
+sf::Color RichText::getFillColor() const { return m_style.fillColors.front(); }
+float RichText::getOutlineThickness() const { return m_style.outlineThicknesses.front(); }
+sf::Color RichText::getOutlineColor() const { return m_style.outlineColors.front(); }
+float RichText::getLetterSpacingFactor() const { return m_style.letterSpacingFactors.front(); }
+float RichText::getLineSpacingFactor() const { return m_style.lineSpacingFactors.front(); }
 
 void RichText::setHorizontalLimit(float limit) {
-	m_horizontalLimit = fmaxf(0, limit);
-	m_geometryNeedsUpdate = true;
-}
-
-void RichText::setCharacterLimit(size_t limit) {
-	m_characterLimit = limit;
-	m_partialDisplayNeedsUpdate = true;
-}
-
-sf::String const& RichText::getString() const { return m_string; }
-
-sf::Font const* RichText::getFont() const { return m_font; }
-
-unsigned int RichText::getCharacterSize() const { return m_characterSize; }
-
-float RichText::getDefaultLetterSpacing() const { return m_dLetterSpacingFactor; }
-
-float RichText::getDefaultLineSpacing() const { return m_dLineSpacingFactor; }
-
-sf::Color const& RichText::getDefaultFillColor() const { return m_dFillColor; }
-
-sf::Color const& RichText::getDefaultOutlineColor() const { return m_dOutlineColor; }
-
-float RichText::getDefaultOutlineThickness() const { return m_dOutlineThickness; }
-
-sf::Uint32 RichText::getDefaultStyle() const {
-	sf::Uint32 style = sf::Text::Regular;
-	if (m_dBold)
-		style &= sf::Text::Bold;
-	if (m_dItalic)
-		style &= sf::Text::Italic;
-	if (m_dUnderlined)
-		style &= sf::Text::Underlined;
-	if (m_dStrikeThrough)
-		style &= sf::Text::StrikeThrough;
-	return style;
+	m_horizontalLimit = limit;
+	m_shouldUpdateVertices = true;
+	m_updateStartLine = 0;
 }
 
 float RichText::getHorizontalLimit() const { return m_horizontalLimit; }
 
+void RichText::setCharacterLimit(size_t limit) {
+	if (m_characterLimit == limit)
+		return;
+	
+	if (!(m_characterLimit >= m_totalDisplayableCharacters && limit >= m_totalDisplayableCharacters)) {
+		size_t startLine = 0;
+		while (startLine < m_lineStart_i.size() && m_lineStart_char[startLine] / 6 < limit)
+			startLine++;
+		
+		m_shouldUpdateVertices = true;
+		m_updateStartLine = std::min(m_updateStartLine, (startLine == 0) ? 0 : startLine-1);
+	}
+	
+	m_characterLimit = limit;
+}
+
 size_t RichText::getCharacterLimit() const { return m_characterLimit; }
 
+size_t RichText::getMaxEffectiveCharacterLimit() const { return m_totalDisplayableCharacters; }
+
 sf::FloatRect RichText::findCharacterBounds(size_t index) const {
-	size_t i = 6*index;
-	if (i >= m_displayableCharacters)
-		throw (std::out_of_range("Character doesn't exist"));
+	if (!m_font || m_string.getSize() == 0 || index >= m_string.getSize())
+		return sf::FloatRect();
 	
-	return sf::FloatRect(m_charVertices[i].position.x,
-						 m_charVertices[i].position.y,
-						 m_charVertices[i+5].position.x - m_charVertices[i].position.x,
-						 m_charVertices[i+5].position.y - m_charVertices[i].position.y);
+	float whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
+	float letterSpacing = (whitespaceWidth / 3.f) * (m_style.letterSpacingFactors.front() - 1.f);
+	float lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.front();
+	
+	sf::Vector2f pos(0, lineSpacing - m_characterSize);
+	bool inWord = false;
+	float currentLineWidth = 0;
+	bool intentionalLineBreak = true;
+	float whiteSpaceWidthAtWordStart = 0;
+	
+	bool passedTarget = false;
+	bool shouldStop = false;
+	float extraWidth = 0;
+	
+	float characterWidth = 0;
+	
+	auto it = m_stylizers.begin();
+	sf::Uint32 previousChar = 0;
+	size_t i = 0;
+	while (i < m_string.getSize() && !shouldStop) {
+		if (i >= index)
+			passedTarget = true;
+		
+		while (it != m_stylizers.end() && it->first <= i) {
+			switch (it->second->stylize(m_style)) {
+			case Stylizer::LetterSpacing:
+				whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
+				letterSpacing = (whitespaceWidth / 3.f) * (m_style.letterSpacingFactors.back() - 1.f);
+				whitespaceWidth += letterSpacing;
+				break;
+			case Stylizer::LineSpacing:
+				lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.back();
+				break;
+			default:
+				break;
+			}
+			it++;
+		}
+		
+		switch (m_string[i]) {
+		case ' ':
+			if (i == index)
+				characterWidth = whitespaceWidth;
+			if (passedTarget) {
+				shouldStop = true;
+				break;
+			}
+			if (inWord) {
+				inWord = false;
+				whiteSpaceWidthAtWordStart = 0;
+				currentLineWidth = pos.x;
+				intentionalLineBreak = false;
+			}
+			
+			pos.x += whitespaceWidth;
+			if (intentionalLineBreak) {
+				currentLineWidth = pos.x;
+			}
+			else {
+				whiteSpaceWidthAtWordStart += whitespaceWidth;
+			}
+			break;
+		case '\n':
+			if (i == index)
+				characterWidth = whitespaceWidth;
+			if (passedTarget) {
+				shouldStop = true;
+				break;
+			}
+			inWord = false;
+			whiteSpaceWidthAtWordStart = 0;
+			pos.x = 0;
+			pos.y += lineSpacing;
+			currentLineWidth = pos.x;
+			intentionalLineBreak = true;
+			break;
+		case '\t': {
+			float added = whitespaceWidth*8;
+			added -= fmodf(pos.x + added, whitespaceWidth*8);
+			if (i == index)
+				characterWidth = added;
+			if (passedTarget) {
+				shouldStop = true;
+				break;
+			}
+			if (inWord) {
+				inWord = false;
+				whiteSpaceWidthAtWordStart = 0;
+				currentLineWidth = pos.x;
+				intentionalLineBreak = false;
+			}
+			
+			pos.x += added;
+			if (intentionalLineBreak) {
+				currentLineWidth = pos.x;
+			}
+			else {
+				whiteSpaceWidthAtWordStart += added;
+			}
+			break;
+		}
+		default:
+			float added = m_font->getKerning(previousChar, m_string[i], m_characterSize) + m_font->getGlyph(m_string[i], m_characterSize, m_style.bolds.back()).advance + letterSpacing;
+			pos.x += added;
+			if (i == index)
+				characterWidth = added;
+			if (passedTarget)
+				extraWidth += added;
+			
+			if (currentLineWidth > 0 && pos.x > m_horizontalLimit) {
+				pos.x -= currentLineWidth + whiteSpaceWidthAtWordStart;
+				pos.y += lineSpacing;
+				currentLineWidth = 0;
+			}
+			break;
+		}
+		
+		previousChar = m_string[i];
+		i++;
+	}
+	
+	m_style.rewind();
+	return sf::FloatRect(pos.x - extraWidth, pos.y, characterWidth, lineSpacing);
 }
 
 sf::FloatRect RichText::getLocalBounds() const {
-	ensureGeometryUpdate();
+	updateVertices();
 	return m_bounds;
 }
 
@@ -140,7 +631,22 @@ sf::FloatRect RichText::getGlobalBounds() const {
 	return getTransform().transformRect(getLocalBounds());
 }
 
-inline float round(float const& f) { return std::floor(f + 0.5f); }
+void RichText::initializeLineStarts() {
+	if (!m_font)
+		return;
+	m_lineStart_i.clear();
+	m_lineStart_i.push_back(0);
+	m_lineStart_verticalPos.clear();
+	m_lineStart_verticalPos.push_back(m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.front());
+	m_lineStart_char.clear();
+	m_lineStart_char.push_back(0);
+	m_lineStart_charOutline.clear();
+	m_lineStart_charOutline.emplace(0, 0);
+	m_lineStart_line.clear();
+	m_lineStart_line.emplace(0, 0);
+	m_lineStart_lineOutline.clear();
+	m_lineStart_lineOutline.emplace(0, 0);
+}
 
 void addGlyphQuad(sf::VertexArray& vertices, sf::Vector2f position, sf::Color const& color, sf::Glyph const& glyph, float italicShear, float outlineThickness = 0) {
 	float padding = 1.0;
@@ -155,15 +661,15 @@ void addGlyphQuad(sf::VertexArray& vertices, sf::Vector2f position, sf::Color co
 	float u2 = static_cast<float>(glyph.textureRect.left + glyph.textureRect.width) + padding;
 	float v2 = static_cast<float>(glyph.textureRect.top  + glyph.textureRect.height) + padding;
 
-	sf::Vertex bottomLeft(sf::Vector2f(round(position.x + left  - italicShear * bottom - outlineThickness), round(position.y + bottom - outlineThickness)), color, sf::Vector2f(u1, v2));
-	sf::Vertex topRight(sf::Vertex(sf::Vector2f(round(position.x + right - italicShear * top    - outlineThickness), round(position.y + top    - outlineThickness)), color, sf::Vector2f(u2, v1)));
+	sf::Vertex bottomLeft(sf::Vector2f(position.x + left  - italicShear * bottom - outlineThickness, position.y + bottom - outlineThickness), color, sf::Vector2f(u1, v2));
+	sf::Vertex topRight(sf::Vertex(sf::Vector2f(position.x + right - italicShear * top - outlineThickness, position.y + top - outlineThickness), color, sf::Vector2f(u2, v1)));
 			
-	vertices.append(sf::Vertex(sf::Vector2f(round(position.x + left  - italicShear * top    - outlineThickness), round(position.y + top    - outlineThickness)), color, sf::Vector2f(u1, v1)));
+	vertices.append(sf::Vertex(sf::Vector2f(position.x + left  - italicShear * top - outlineThickness, position.y + top - outlineThickness), color, sf::Vector2f(u1, v1)));
 	vertices.append(topRight);
 	vertices.append(bottomLeft);
 	vertices.append(bottomLeft);
 	vertices.append(topRight);
-	vertices.append(sf::Vertex(sf::Vector2f(round(position.x + right - italicShear * bottom - outlineThickness), round(position.y + bottom - outlineThickness)), color, sf::Vector2f(u2, v2)));
+	vertices.append(sf::Vertex(sf::Vector2f(position.x + right - italicShear * bottom - outlineThickness, position.y + bottom - outlineThickness), color, sf::Vector2f(u2, v2)));
 }
 
 void addLine(sf::VertexArray& vertices, sf::Vector2f origin, float lineLength, const sf::Color& color, float thickness, float outlineThickness = 0)
@@ -171,453 +677,381 @@ void addLine(sf::VertexArray& vertices, sf::Vector2f origin, float lineLength, c
 	float top = std::floor(origin.y - (thickness / 2) + 0.5f);
 	float bottom = top + std::floor(thickness + 0.5f);
 
-	sf::Vertex bottomLeft(sf::Vector2f(round(origin.x - outlineThickness),					round(bottom + outlineThickness)), color, sf::Vector2f(1, 1));
-	sf::Vertex topRight(sf::Vector2f(round(origin.x + lineLength + outlineThickness),	round(top    - outlineThickness)), color, sf::Vector2f(1, 1));
+	sf::Vertex bottomLeft(sf::Vector2f(origin.x - outlineThickness, bottom + outlineThickness), color, sf::Vector2f(1, 1));
+	sf::Vertex topRight(sf::Vector2f(origin.x + lineLength + outlineThickness, top - outlineThickness), color, sf::Vector2f(1, 1));
 	
-	vertices.append(sf::Vertex(sf::Vector2f(round(origin.x - outlineThickness),					round(top    - outlineThickness)), color, sf::Vector2f(1, 1)));
+	vertices.append(sf::Vertex(sf::Vector2f(origin.x - outlineThickness, top - outlineThickness), color, sf::Vector2f(1, 1)));
 	vertices.append(topRight);
 	vertices.append(bottomLeft);
 	vertices.append(bottomLeft);
 	vertices.append(topRight);
-	vertices.append(sf::Vertex(sf::Vector2f(round(origin.x + lineLength + outlineThickness),	round(bottom + outlineThickness)), color, sf::Vector2f(1, 1)));
+	vertices.append(sf::Vertex(sf::Vector2f(origin.x + lineLength + outlineThickness, bottom + outlineThickness), color, sf::Vector2f(1, 1)));
 }
 
-void RichText::draw(sf::RenderTarget& target, sf::RenderStates states) const {
+void resizeLineStartMap(std::map<size_t, size_t>& map, size_t const& firstLineToErase) {
+	auto it = map.begin();
+	while (it != map.end() && it->first < firstLineToErase) {
+		it++;
+	}
+	map.erase(it, map.end());
+}
+
+size_t const& getLastVerticesIndexBeforeLine(std::map<size_t, size_t> const& map, size_t const& startLine) {
+	auto it = map.lower_bound(startLine);
+	if (it == map.end()) {
+		return (--it)->second;
+	}
+	return it->second;
+}
+
+void roundNewVertices(sf::VertexArray& va, size_t newVerticesStart) {
+	size_t len = va.getVertexCount();
+	for (size_t i = newVerticesStart; i < len; i++) {
+		va[i].position.x = roundf(va[i].position.x);
+		va[i].position.y = roundf(va[i].position.y);
+	}
+}
+
+void RichText::updateVertices() const {
 	if (!m_font)
 		return;
 	
-	states.texture = &m_font->getTexture(m_characterSize);
-	states.transform *= getTransform();
-	
-	ensureGeometryUpdate();
-	ensurePartialDisplayUpdate();
-	
-	if (m_characterLimit < m_displayableCharacters) {
-		if (m_partialDisplayVertices.getVertexCount() > 0) {
-			target.draw(m_partialDisplayVertices, states);
-		}
-	}
-	else {
-		if (m_charOutlineVertices.getVertexCount() > 0)
-			target.draw(m_charOutlineVertices, states);
-		if (m_lineOutlineVertices.getVertexCount() > 0)
-			target.draw(m_lineOutlineVertices, states);
-		if (m_charVertices.getVertexCount() > 0)
-			target.draw(m_charVertices, states);
-		if (m_lineVertices.getVertexCount() > 0)
-			target.draw(m_lineVertices, states);
-	}
-}
-
-void RichText::ensureGeometryUpdate() const {
-	if (!m_font || !m_geometryNeedsUpdate)
+	if (!m_shouldUpdateVertices)
 		return;
-	m_partialDisplayNeedsUpdate = true;
 	
-	m_charVertices.clear();
-	m_lineVertices.clear();
-	m_charOutlineVertices.clear();
-	m_lineOutlineVertices.clear();
-	m_lineNumberOfLine.clear();
-	m_charNumberOfCharOutline.clear();
-	m_lineNumberOfLineOutline.clear();
-	m_lastCharNumberInLine.clear();
+	//Updating from a certain line:	
+	//Don't update if the starting line is after all explored lines
+	if (m_updateStartLine >= m_lineStart_i.size()) {
+		m_updateStartLine = std::numeric_limits<size_t>::max();
+		return;
+	}
 	
-	bool bold = m_dBold;
-	bool italic = m_dItalic;
-	bool underlined = m_dUnderlined;
-	bool strikeThrough = m_dStrikeThrough;
+	//First, make all the lines after the starting line unexplored:
+	m_lineStart_i.resize(m_updateStartLine+1);
+	m_lineStart_verticalPos.resize(m_updateStartLine+1);
+	m_lineStart_char.resize(m_updateStartLine+1);
+	resizeLineStartMap(m_lineStart_line, m_updateStartLine+1);
+	resizeLineStartMap(m_lineStart_charOutline, m_updateStartLine+1);
+	resizeLineStartMap(m_lineStart_lineOutline, m_updateStartLine+1);
 	
-	std::stack<sf::Color> fillColors;
-	fillColors.push(m_dFillColor);
-	std::stack<sf::Color> outlineColors;
-	outlineColors.push(m_dOutlineColor);
-	std::stack<float> outlineThicknesses;
-	outlineThicknesses.push(m_dOutlineThickness);
+	//Discard the vertex arrays' information starting from the starting line.
+	//We keep the indices so that they can be used at the end of the program for pixel alignment of all new vertices
+	size_t startOfNewCharVertices = m_lineStart_char[m_updateStartLine];
+	m_charVertices.resize(startOfNewCharVertices);
+	size_t startOfNewCharOutlineVertices = getLastVerticesIndexBeforeLine(m_lineStart_charOutline, m_updateStartLine);
+	m_charOutlineVertices.resize(startOfNewCharOutlineVertices);
+	size_t startOfNewLineVertices = getLastVerticesIndexBeforeLine(m_lineStart_line, m_updateStartLine);
+	m_lineVertices.resize(startOfNewLineVertices);
+	size_t startOfNewLineOutlineVertices = getLastVerticesIndexBeforeLine(m_lineStart_lineOutline, m_updateStartLine);
+	m_lineOutlineVertices.resize(startOfNewLineOutlineVertices);
 	
+	//Populate the starting variables with the line start info
+	size_t i = m_lineStart_i[m_updateStartLine];
+	sf::Vector2f pos(0, m_lineStart_verticalPos[m_updateStartLine]);
+	size_t i_displayOnly = m_charVertices.getVertexCount() / 6;
+	
+	//Populate the complex variables with the default style values
+	m_style.rewind();
 	float whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
-	std::stack<float> letterSpacings;
-	letterSpacings.push((whitespaceWidth / 3.f) * (m_dLetterSpacingFactor - 1.f));
-	whitespaceWidth += letterSpacings.top();
-	std::stack<float> lineSpacings;
-	lineSpacings.push(m_font->getLineSpacing(m_characterSize) * m_dLineSpacingFactor);
-	
-	bool hasOutline = outlineThicknesses.top() != 0.f;
-	
-	sf::Vector2f pos(0, static_cast<float>(m_characterSize));
-	
+	float letterSpacing = (whitespaceWidth / 3.f) * (m_style.letterSpacingFactors.front() - 1.f);
+	whitespaceWidth += letterSpacing;
+	float lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.front();
 	float lineThickness = m_font->getUnderlineThickness(m_characterSize);
+	
 	sf::Vector2f underlineStart(pos.x, pos.y + m_font->getUnderlinePosition(m_characterSize));
 	sf::Vector2f underlineOutlineStart = underlineStart;
 	sf::FloatRect xBounds = m_font->getGlyph(L'x', m_characterSize, false).bounds;
 	sf::Vector2f strikeThroughStart(pos.x, pos.y + xBounds.top + xBounds.height * 0.4f);
 	sf::Vector2f strikeThroughOutlineStart = strikeThroughStart;
+	float italicShear = m_style.italics.back() ? 0.209f : 0.f;
+	bool hasOutline = m_style.outlineThicknesses.front() != 0.f;
 	
-	sf::Uint32 prevChar = 0;
-	float currentLineWidth = 0;
-	size_t currentDisplayedCharacter = 0;
-	size_t currentLine = 0;
+	//Now, update the style (and complex variables) by iterating through the stylizers up to the starting line
+	auto it = m_stylizers.begin();
+	while (it != m_stylizers.end() && it->first <= i) {
+		switch (it->second->stylize(m_style)) {
+		case Stylizer::Italic:
+			italicShear = m_style.italics.back() ? 0.209f : 0.f;
+			break;
+		case Stylizer::OutlineThickness:
+			hasOutline = m_style.outlineThicknesses.back() != 0.f;
+			break;
+		case Stylizer::LetterSpacing:
+			whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
+			letterSpacing = (whitespaceWidth / 3.f) * (m_style.letterSpacingFactors.back() - 1.f);
+			whitespaceWidth += letterSpacing;
+			break;
+		case Stylizer::LineSpacing:
+			lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.back();
+			break;
+		default:
+			break;
+		}
+		it++;
+	}
 	
 	sf::VertexArray wordCharVertices = sf::VertexArray(sf::Triangles);
 	sf::VertexArray wordLineVertices  = sf::VertexArray(sf::Triangles);
 	sf::VertexArray wordCharOutlineVertices  = sf::VertexArray(sf::Triangles);
 	sf::VertexArray wordLineOutlineVertices  = sf::VertexArray(sf::Triangles);
 	
-	float lineSpacingAtWordStart = lineSpacings.top();
-	float outlineThicknessAtWordStart = outlineThicknesses.top();
-	float whitespaceWidthAtWordStart = whitespaceWidth;
+	float lineSpacingAtWordStart = lineSpacing;
+	float outlineThicknessAtWordStart = m_style.outlineThicknesses.back();
+	float whitespaceWidthAtWordStart = 0;
+	size_t whitespacesAtWordStart = 0;
+	size_t i_atWordStart = 0;	
 	
-	std::function<void()> addWordToText = [&]() { 
+	float currentLineWidth = 0.f;
+	bool intentionalLineBreak = true; //When true, whitespace before the first word of a line can push it to line wrapping; becomes false after a line wrap (the whitespace "disappears").
+	
+	size_t currentLine = m_updateStartLine;
+	m_updateStartLine = std::numeric_limits<size_t>::max();
+	
+	bool reachedCharacterLimit = false;
+	
+	const std::function<void()> addWordToText = [&]() { 
 		for (size_t i = 0; i < wordCharVertices.getVertexCount(); i++)
 			m_charVertices.append(wordCharVertices[i]);
-		wordCharVertices.clear();
 		for (size_t i = 0; i < wordLineVertices.getVertexCount(); i+=6) {
-			m_lineNumberOfLine.push_back(currentLine);
 			for (size_t j = i; j < i+6; j++)
 				m_lineVertices.append(wordLineVertices[j]);
 		}
-		wordLineVertices.clear();
 		for (size_t i = 0; i < wordCharOutlineVertices.getVertexCount(); i++)
 			m_charOutlineVertices.append(wordCharOutlineVertices[i]);
-		wordCharOutlineVertices.clear();
 		for (size_t i = 0; i < wordLineOutlineVertices.getVertexCount(); i+=6) {
-			m_lineNumberOfLineOutline.push_back(currentLine);
 			for (size_t j = i; j < i+6; j++)
 				m_lineOutlineVertices.append(wordLineOutlineVertices[j]);
 		}
-		wordLineOutlineVertices.clear();	
 	};
 	
-	std::function<void()> resetWordStart = [&]() {
-		lineSpacingAtWordStart = lineSpacings.top();
-		outlineThicknessAtWordStart = outlineThicknesses.top();
-		whitespaceWidthAtWordStart = whitespaceWidth;
+	const std::function<void()> resetWord = [&]() {
+		wordCharVertices.clear();
+		wordLineVertices.clear();
+		wordCharOutlineVertices.clear();
+		wordLineOutlineVertices.clear();
+		
+		currentLineWidth = pos.x;
+		lineSpacingAtWordStart = lineSpacing;
+		outlineThicknessAtWordStart = m_style.outlineThicknesses.back();
+		whitespaceWidthAtWordStart = 0;
+		whitespacesAtWordStart = 0;
+		i_atWordStart = i;
 	};
 	
-	size_t i = 0;
+	const std::function<void()> setLineStarts = [&]() {
+		m_lineStart_i.push_back(i_atWordStart + whitespacesAtWordStart);
+		m_lineStart_verticalPos.push_back(pos.y);
+		
+		m_lineStart_char.push_back(m_charVertices.getVertexCount());
+		if (m_lineStart_charOutline.rbegin()->second != m_charOutlineVertices.getVertexCount()) //If any char outlines were added since the last line logged in the map
+			m_lineStart_charOutline.emplace(currentLine, m_charOutlineVertices.getVertexCount());
+		if (m_lineStart_line.rbegin()->second != m_lineVertices.getVertexCount())
+			m_lineStart_line.emplace(currentLine, m_lineVertices.getVertexCount());
+		if (m_lineStart_lineOutline.rbegin()->second != m_lineOutlineVertices.getVertexCount())
+			m_lineStart_lineOutline.emplace(currentLine, m_lineOutlineVertices.getVertexCount());
+	};
+	
+	sf::Uint32 previousChar = 0;
 	size_t len = m_string.getSize();
-	while (i < len) {	
-		switch (m_string[i]) {
-		case '<': {
-			size_t end = m_string.find('>', i);
-			if (end == std::string::npos) { //Non-closed tag
-				i = len;
-				continue;
+	
+	while (i < len) {
+		if (i_displayOnly == m_characterLimit) {			
+			if (m_style.underlineds.back()) {
+				addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, m_style.fillColors.back(), lineThickness);
+				if (hasOutline) {
+					addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
+				}
 			}
-			std::string tags = m_string.substring(i+1, end-i-1);
-			size_t tagStart = 0;
-			size_t tagEnd;
-			do {
-				tagEnd = tags.find(',', tagStart);
-				
-				std::string fullTag = tags.substr(tagStart, tagEnd - tagStart);		
-				tagStart = tagEnd + 1;
-				
-				if (fullTag.size() == 0)
-					continue;
-				
-				bool ending = (fullTag[0] == '/');
-				if (ending)
-					fullTag = fullTag.substr(1);
-				if (fullTag.size() == 1) { //char tag with no argument
-					switch (fullTag[0]) {
-					case 'b':
-						bold = !ending;
-						break;
-					case 'i':
-						italic = !ending;
-						break;
-					case 'u':
-						if (underlined && ending) {
-							addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
-							if (hasOutline) {
-								addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-							}
-						}
-						underlined = !ending;
-						if (underlined) {
-							underlineStart.x = pos.x;
-							if (hasOutline)
-								underlineOutlineStart.x = pos.x;
-						}
-						break;
-					case 's':
-						if (strikeThrough && ending) {
-							addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
-							if (hasOutline) {
-								addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-							}
-						}
-						strikeThrough = !ending;
-						if (strikeThrough) {
-							strikeThroughStart.x = pos.x;
-							if (hasOutline)
-								strikeThroughOutlineStart.x = pos.x;
-						}
-						break;
-					case 'c':
-						if (ending && fillColors.size() > 1) {
-							if (underlined) {
-								addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
-								underlineStart.x = pos.x;
-							}
-							
-							if (strikeThrough) {
-								addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
-								strikeThroughStart.x = pos.x;
-							}
-							
-							fillColors.pop();
-						}
-						break;
-					default:
-						break;
-					}
-					
-					continue;
+			if (m_style.strikeThroughs.back()) {
+				addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, m_style.fillColors.back(), lineThickness);
+				if (hasOutline) {
+					addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 				}
-				
-				
-				size_t argPos = fullTag.find('=');
-				if (argPos == std::string::npos) { //string tag with no argument
-					if (ending && fullTag.compare("oc") == 0 && outlineColors.size() > 1) {
-						if (hasOutline) {
-							if (underlined) {
-								addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-								underlineOutlineStart.x = pos.x;
-							}
-							if (strikeThrough) {
-								addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-								strikeThroughOutlineStart.x = pos.x;
-							}
-						}
-						outlineColors.pop();
-					}
-					else if (ending && fullTag.compare("lns") == 0 && letterSpacings.size() > 1)
-						letterSpacings.pop();
-					else if (ending && fullTag.compare("lts") == 0 && lineSpacings.size() > 1)
-						lineSpacings.pop();
-					else if (ending && fullTag.compare("ot") == 0 && outlineThicknesses.size() > 1) {
-						if (underlined) {
-							addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-							underlineOutlineStart.x = pos.x;
-						}
-						if (strikeThrough) {
-							addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-							strikeThroughOutlineStart.x = pos.x;
-						}
-						outlineThicknesses.pop();
-						hasOutline = outlineThicknesses.top() != 0.f;
-					}
-					continue;
-				}
-				
-				
-				if (argPos + 1 >= fullTag.size()) //Empty argument
-					continue;
-				
-				std::string tag = fullTag.substr(0, argPos);
-				std::string arg = fullTag.substr(argPos+1);
-				
-				if (argPos == 1 || (ending && argPos == 2)) { //char tag with argument
-					switch(tag[0]) {
-					case 'c': {
-						if (underlined) {
-							addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
-							underlineStart.x = pos.x;
-						}
-						
-						if (strikeThrough) {
-							addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
-							strikeThroughStart.x = pos.x;
-						}
-						if (arg[0] == '#') { //Hexcode color
-							long fullCode = 0;
-							size_t j = 0;
-							try {
-								fullCode = std::stol(arg.substr(1), &j, 16);
-							} catch (...) {
-								continue;
-							}
-							if (j == 6) { //No transparency value
-								fillColors.push(sf::Color((fullCode >> 16) & 0xFF, (fullCode >> 8) & 0xFF, fullCode & 0xFF));
-							}
-							else if (j == 8) {
-								fillColors.push(sf::Color((fullCode >> 24) & 0xFF, (fullCode >> 16) & 0xFF, (fullCode >> 8) & 0xFF, fullCode & 0xFF));
-							}
-						}
-						else { //String code color
-						}
-						break;
-					}
-					default:
-						break;
-					}
-				}
-				else { //string tag with argument
-					if (tag.compare("oc") == 0) {
-						if (hasOutline) {
-							if (underlined) {
-								addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-								underlineOutlineStart.x = pos.x;
-							}
-							if (strikeThrough) {
-								addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-								strikeThroughOutlineStart.x = pos.x;
-							}
-						}
-						if (arg[0] == '#') { //Hexcode color
-							long fullCode = 0;
-							size_t j = 0;
-							try {
-								fullCode = std::stol(arg.substr(1), &j, 16);
-							} catch (...) {
-								continue;
-							}
-							if (j == 6) { //No transparency value
-								outlineColors.push(sf::Color((fullCode >> 16) & 0xFF, (fullCode >> 8) & 0xFF, fullCode & 0xFF));
-							}
-							else if (j == 8) {
-								outlineColors.push(sf::Color((fullCode >> 24) & 0xFF, (fullCode >> 16) & 0xFF, (fullCode >> 8) & 0xFF, fullCode & 0xFF));
-							}
-						}
-						else { //String code color
-						}
-					}
-					else if (tag.compare("lts") == 0) {
-						float factor = 0;
-						size_t j = 0;
-						try {
-							factor = std::stof(arg, &j);
-						} catch (...) {
-							continue;
-						}
-						if (j == arg.size()) {
-							whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
-							letterSpacings.push((whitespaceWidth / 3.f) * (factor - 1.f));
-							whitespaceWidth += letterSpacings.top();
-						}
-					}
-					else if (tag.compare("lns") == 0) {
-						float factor = 0;
-						size_t j = 0;
-						try {
-							factor = std::stof(arg, &j);
-						} catch (...) {
-							continue;
-						}
-						if (j == arg.size()) {
-							lineSpacings.push(m_font->getLineSpacing(m_characterSize) * factor);
-						}
-					}
-					else if (tag.compare("ot") == 0) {
-						float t = 0;
-						size_t j = 0;
-						try {
-							t = std::stof(arg, &j);
-						} catch (...) {
-							continue;
-						}
-						if (j == arg.size()) {
-							if (hasOutline) {
-								if (underlined) {
-									addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-								}
-								if (strikeThrough) {
-									addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-								}
-							}
-							
-							outlineThicknesses.push(t);
-							
-							hasOutline = t != 0.f;
-							if (hasOutline) {
-								if (underlined)
-									underlineOutlineStart.x = pos.x;
-								if (strikeThrough)
-									strikeThroughOutlineStart.x = pos.x;
-							}
-						}
-					}
-				}
-				
-			} while(tagEnd != std::string::npos);
+			}
 			
-			i = end;
-			break;
+			reachedCharacterLimit = true;
 		}
-		case ' ': {			
-			addWordToText();
-			resetWordStart();
+		
+		if (it != m_stylizers.end() && it->first == i) { //If stylizers exist at i
+			bool shouldUpdateUnderline = false, shouldUpdateUnderlineOutline = false, shouldUpdateStrikeThrough = false, shouldUpdateStrikeThroughOutline = false;
+			bool wasUnderlined = m_style.underlineds.back();
+			bool wasStrikeThrough = m_style.strikeThroughs.back();
+			bool hadOutline = hasOutline;
+			float oldLineThickness = lineThickness;
+			sf::Color oldFillColor = m_style.fillColors.back();
+			float oldOutlineThickness = m_style.outlineThicknesses.back();
+			sf::Color oldOutlineColor = m_style.outlineColors.back();
 			
-			currentLineWidth = pos.x;
+			while (it != m_stylizers.end() && it->first == i) { //Modify the style; the return type gives info on whether or not the modification changed the style visually
+				it->second->line = currentLine;
+				switch (it->second->stylize(m_style)) {
+				case Stylizer::Italic:
+					italicShear = m_style.italics.back() ? 0.209f : 0.f;
+					break;
+				case Stylizer::Underlined:
+					shouldUpdateUnderline = true;
+					shouldUpdateUnderlineOutline = true;
+					break;
+				case Stylizer::StrikeThrough:
+					shouldUpdateStrikeThrough = true;
+					shouldUpdateStrikeThroughOutline = true;
+					break;
+				case Stylizer::FillColor:
+					shouldUpdateUnderline = true;
+					shouldUpdateStrikeThrough = true;
+					break;
+				case Stylizer::OutlineThickness:
+					shouldUpdateUnderlineOutline = true;
+					shouldUpdateStrikeThroughOutline = true;
+					hasOutline = m_style.outlineThicknesses.back() != 0.f;
+					break;
+				case Stylizer::OutlineColor:
+					shouldUpdateUnderlineOutline = true;
+					shouldUpdateStrikeThroughOutline = true;
+					break;
+				case Stylizer::LetterSpacing:
+					whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
+					letterSpacing = (whitespaceWidth / 3.f) * (m_style.letterSpacingFactors.back() - 1.f);
+					whitespaceWidth += letterSpacing;
+					break;
+				case Stylizer::LineSpacing:
+					lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.back();
+					break;
+				default:
+					break;
+				}
+				it++;
+			}
+				
+			if (!reachedCharacterLimit) {
+				if (shouldUpdateUnderline) {
+					if (wasUnderlined)
+						addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, oldFillColor, oldLineThickness);
+					if (m_style.underlineds.back())
+						underlineStart.x = pos.x;
+				}
+				if (shouldUpdateStrikeThrough) {
+					if (wasStrikeThrough)
+						addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, oldFillColor, oldLineThickness);
+					if (m_style.strikeThroughs.back())
+						strikeThroughStart.x = pos.x;
+				}
+				if (shouldUpdateUnderlineOutline) {
+					if (hadOutline && wasUnderlined)
+						addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, oldOutlineColor, oldLineThickness, oldOutlineThickness);
+					if (hasOutline && m_style.underlineds.back())
+						underlineOutlineStart.x = pos.x;
+				}
+				if (shouldUpdateStrikeThroughOutline) {
+					if (hadOutline && wasStrikeThrough)
+						addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, oldOutlineColor, oldLineThickness, oldOutlineThickness);
+					if (hasOutline && m_style.strikeThroughs.back())
+						strikeThroughOutlineStart.x = pos.x;
+				}
+			}
+			
+		}
+		
+		sf::Uint32 currentChar = m_string[i];
+		
+		bool shouldStop = false;
+		
+		switch (currentChar) {
+		case ' ': {
+			if (reachedCharacterLimit) {
+				shouldStop = true;
+				break;
+			}
+			if (wordCharVertices.getVertexCount() > 0) {
+				addWordToText();
+				resetWord();
+				intentionalLineBreak = false;
+			}
+			
 			pos.x += whitespaceWidth;
+			if (intentionalLineBreak) {
+				currentLineWidth = pos.x;
+			}
+			else {
+				whitespaceWidthAtWordStart += whitespaceWidth;
+				whitespacesAtWordStart++;
+			}
 			break;
 		}
 		case '\t': {
-			addWordToText();
-			resetWordStart();
+			if (reachedCharacterLimit) {
+				shouldStop = true;
+				break;
+			}
+			float added = whitespaceWidth*8;
+			added -= fmodf(pos.x + added, whitespaceWidth*8);
+			if (wordCharVertices.getVertexCount() > 0) {
+				addWordToText();
+				resetWord();
+				intentionalLineBreak = false;
+			}
 			
-			currentLineWidth = pos.x;
-			
-			pos.x += whitespaceWidth*8;
-			pos.x -= fmodf(pos.x, whitespaceWidth*8);
+			pos.x += added;
+			if (intentionalLineBreak) {
+				currentLineWidth = pos.x;
+			}
+			else {
+				whitespaceWidthAtWordStart += added;
+				whitespacesAtWordStart++;
+			}
 			break;
 		}
 		case '\n': {
-			addWordToText();
-			resetWordStart();
+			if (reachedCharacterLimit) {
+				shouldStop = true;
+				break;
+			}
 			
-			if (underlined) {
-				addLine(m_lineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
-				m_lineNumberOfLine.push_back(currentLine);
+			addWordToText();
+			resetWord();
+			
+			if (m_style.underlineds.back()) {
+				addLine(m_lineVertices, underlineStart, pos.x - underlineStart.x, m_style.fillColors.back(), lineThickness);
 				if (hasOutline) {
-					addLine(m_lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_lineNumberOfLineOutline.push_back(currentLine);
+					addLine(m_lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 				}
 			}
-			if (strikeThrough) {
-				addLine(m_lineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
-				m_lineNumberOfLine.push_back(currentLine);
+			if (m_style.strikeThroughs.back()) {
+				addLine(m_lineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, m_style.fillColors.back(), lineThickness);
 				if (hasOutline) {
-					addLine(m_lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_lineNumberOfLineOutline.push_back(currentLine);
+					addLine(m_lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 				}
 			}
 			pos.x = 0;
-			pos.y += lineSpacings.top();
+			pos.y += lineSpacing;
 			
 			underlineStart.x = 0;
-			underlineStart.y += lineSpacings.top();
+			underlineStart.y += lineSpacing;
 			underlineOutlineStart = underlineStart;
 			strikeThroughStart.x = 0;
-			strikeThroughStart.y += lineSpacings.top();
+			strikeThroughStart.y += lineSpacing;
 			strikeThroughOutlineStart = strikeThroughStart;
 			
-			m_lastCharNumberInLine.push_back(currentDisplayedCharacter);
-			currentLine++;
 			currentLineWidth = 0;
+			currentLine++;
+			whitespacesAtWordStart++;
+			
+			setLineStarts();
+			
+			intentionalLineBreak = true;
 			break;
 		}
-		case '\r':
-			break;
-		default: {
-			if (m_string[i] == '\\' && i < len-1)
-				i++;
+		default: {			
+			pos.x += m_font->getKerning(previousChar, m_string[i], m_characterSize);
 			
-			pos.x += m_font->getKerning(prevChar, m_string[i], m_characterSize);
-			
-			if (outlineThicknesses.top() != 0.f) {
-				m_charNumberOfCharOutline.push_back(currentDisplayedCharacter);
-				sf::Glyph const& go = m_font->getGlyph(m_string[i], m_characterSize, bold, outlineThicknesses.top());
-				addGlyphQuad(wordCharOutlineVertices, pos, outlineColors.top(), go, italic ? 0.209f : 0, outlineThicknesses.top());
+			sf::Glyph const& g = m_font->getGlyph(m_string[i], m_characterSize, m_style.bolds.back());
+			if (!reachedCharacterLimit) {
+				addGlyphQuad(wordCharVertices, pos, m_style.fillColors.back(), g, italicShear);
+				if (hasOutline)
+					addGlyphQuad(wordCharOutlineVertices, pos, m_style.outlineColors.back(), m_font->getGlyph(m_string[i], m_characterSize, m_style.bolds.back(), m_style.outlineThicknesses.back()), italicShear, m_style.outlineThicknesses.back());
 			}
-			sf::Glyph const& g = m_font->getGlyph(m_string[i], m_characterSize, bold);
-			addGlyphQuad(wordCharVertices, pos, fillColors.top(), g, italic ? 0.209f : 0);
-			
-			pos.x += g.advance + letterSpacings.top();
-			currentDisplayedCharacter += 1;
-			
+			pos.x += g.advance + letterSpacing;
+			i_displayOnly++;
 			
 			//Move the word down a line if it became too long
 			if (currentLineWidth != 0.f && pos.x > m_horizontalLimit) {
@@ -625,25 +1059,27 @@ void RichText::ensureGeometryUpdate() const {
 				sf::Vector2f wordMovement(-extendedLineWidth, lineSpacingAtWordStart);
 								
 				//If a line was in progress and started before the word, finish it before moving on
-				if (underlined && underlineStart.x < currentLineWidth) {
-					addLine(m_lineVertices, underlineStart, currentLineWidth - underlineStart.x, fillColors.top(), lineThickness);
-					m_lineNumberOfLine.push_back(currentLine);
-					underlineStart.x = extendedLineWidth;
-				}
-				if (hasOutline && underlined && underlineOutlineStart.x < currentLineWidth) {
-					addLine(m_lineOutlineVertices, underlineOutlineStart, currentLineWidth - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_lineNumberOfLineOutline.push_back(currentLine);
-					underlineOutlineStart.x = extendedLineWidth;
-				}
-				if (strikeThrough && strikeThroughStart.x < currentLineWidth) {
-					addLine(m_lineVertices, strikeThroughStart, currentLineWidth - strikeThroughStart.x, fillColors.top(), lineThickness);
-					m_lineNumberOfLine.push_back(currentLine);
-					strikeThroughStart.x = extendedLineWidth;
-				}
-				if (hasOutline && strikeThrough && strikeThroughOutlineStart.x < currentLineWidth) {
-					addLine(m_lineOutlineVertices, strikeThroughOutlineStart, currentLineWidth - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-					m_lineNumberOfLineOutline.push_back(currentLine);
-					strikeThroughOutlineStart.x = extendedLineWidth;
+				if (!reachedCharacterLimit) {
+					if (m_style.underlineds.back()) {
+						if (underlineStart.x < currentLineWidth) {
+							addLine(m_lineVertices, underlineStart, currentLineWidth - underlineStart.x, m_style.fillColors.back(), lineThickness);
+							underlineStart.x = extendedLineWidth;
+						}
+						if (hasOutline && underlineOutlineStart.x < currentLineWidth) {
+							addLine(m_lineOutlineVertices, underlineOutlineStart, currentLineWidth - underlineOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
+							underlineOutlineStart.x = extendedLineWidth;
+						}	
+					}
+					if (m_style.strikeThroughs.back()) {
+						if (strikeThroughStart.x < currentLineWidth) {
+							addLine(m_lineVertices, strikeThroughStart, currentLineWidth - strikeThroughStart.x, m_style.fillColors.back(), lineThickness);
+							strikeThroughStart.x = extendedLineWidth;
+						}
+						if (hasOutline && strikeThroughOutlineStart.x < currentLineWidth) {
+							addLine(m_lineOutlineVertices, strikeThroughOutlineStart, currentLineWidth - strikeThroughOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
+							strikeThroughOutlineStart.x = extendedLineWidth;
+						}
+					}
 				}
 				
 				//If any finished line in the word stemmed from before it, cut it in half at the start of the word (one half will stay, the other will move with the word)
@@ -652,12 +1088,11 @@ void RichText::ensureGeometryUpdate() const {
 						for (size_t j = 0; j < 6; j++) {
 							sf::Vertex v = wordLineVertices[i+j];
 							if (j == 1 || j == 4 || j == 5) //Shorten the end of the first half, which will stay on the line
-								v.position.x = currentLineWidth;
+								v.position.x = roundf(currentLineWidth);
 							else
 								wordLineVertices[i+j].position.x = extendedLineWidth; //Push the beginning of the second, which will go down with the word afterwards
 							m_lineVertices.append(v);
 						}
-						m_lineNumberOfLine.push_back(currentLine);
 					}
 					
 					for (size_t j = i; j < i+6; j++) {
@@ -670,12 +1105,11 @@ void RichText::ensureGeometryUpdate() const {
 							sf::Vertex v = wordLineOutlineVertices[i+j];
 							
 							if (j == 1 || j == 4 || j == 5)
-								v.position.x = currentLineWidth + outlineThicknessAtWordStart;
+								v.position.x = roundf(currentLineWidth + outlineThicknessAtWordStart);
 							else
 								wordLineOutlineVertices[i+j].position.x = extendedLineWidth - outlineThicknessAtWordStart;
 							m_lineOutlineVertices.append(v);
 						}
-						m_lineNumberOfLineOutline.push_back(currentLine);
 					}
 					
 					for (size_t j = i; j < i+6; j++) {
@@ -696,39 +1130,46 @@ void RichText::ensureGeometryUpdate() const {
 				strikeThroughStart += wordMovement;
 				strikeThroughOutlineStart += wordMovement;
 				
-				m_lastCharNumberInLine.push_back(currentDisplayedCharacter - wordCharVertices.getVertexCount() / 6);
+				currentLineWidth = 0;
 				currentLine++;
 				
-				currentLineWidth = 0;
+				setLineStarts();
+				
+				if (reachedCharacterLimit)
+					shouldStop = true;
 			}
 			
 			break;
 		}
 		}
 		
+		if (shouldStop)
+			break;
+		
+		previousChar = m_string[i];
 		i++;
 	}
 	
-	//Finish any unfinished lines
-	if (underlined) {
-		addLine(m_lineVertices, underlineStart, pos.x - underlineStart.x, fillColors.top(), lineThickness);
-		m_lineNumberOfLine.push_back(currentLine);
-		if (hasOutline) {
-			addLine(m_lineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-			m_lineNumberOfLineOutline.push_back(currentLine);
+	if (!reachedCharacterLimit) {
+		float excessWhiteSpace = wordCharVertices.getVertexCount() == 0 ? whitespaceWidthAtWordStart : 0;
+		if (m_style.underlineds.back()) {
+			addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x - excessWhiteSpace, m_style.fillColors.back(), lineThickness);
+			if (hasOutline)
+				addLine(wordLineOutlineVertices, underlineOutlineStart, pos.x - underlineOutlineStart.x - excessWhiteSpace, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 		}
-	}
-	if (strikeThrough) {
-		addLine(m_lineVertices, strikeThroughStart, pos.x - strikeThroughStart.x, fillColors.top(), lineThickness);
-		m_lineNumberOfLine.push_back(currentLine);
-		if (hasOutline) {
-			addLine(m_lineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, outlineColors.top(), lineThickness, outlineThicknesses.top());
-			m_lineNumberOfLineOutline.push_back(currentLine);
+		if (m_style.strikeThroughs.back()) {
+			addLine(wordLineVertices, strikeThroughStart, pos.x - strikeThroughStart.x - excessWhiteSpace, m_style.fillColors.back(), lineThickness);
+			if (hasOutline)
+				addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x - excessWhiteSpace, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 		}
 	}
 	
-	//Add the last word
 	addWordToText();
+	
+	roundNewVertices(m_charVertices, startOfNewCharVertices);
+	roundNewVertices(m_charOutlineVertices, startOfNewCharOutlineVertices);
+	roundNewVertices(m_lineVertices, startOfNewLineVertices);
+	roundNewVertices(m_lineOutlineVertices, startOfNewLineOutlineVertices);
 	
 	//Compute bounds; in a square of 6 vertices, the first one is the upper left and the last one the bottom right
 	float minX = std::numeric_limits<float>::infinity(), minY = std::numeric_limits<float>::infinity(),
@@ -750,80 +1191,145 @@ void RichText::ensureGeometryUpdate() const {
 	m_bounds.width = maxX - minX;
 	m_bounds.height = maxY - minY;
 	
-	m_displayableCharacters = currentDisplayedCharacter;
+	m_style.rewind();
 	
-	m_geometryNeedsUpdate = false;
+	m_shouldUpdateVertices = false;
 }
 
-void RichText::ensurePartialDisplayUpdate() const {
-	if (!m_font || !m_partialDisplayNeedsUpdate)
+void RichText::draw(sf::RenderTarget& target, sf::RenderStates states) const {
+	if (!m_font)
 		return;
 	
-	m_partialDisplayVertices.clear();
+	states.transform *= getTransform();
+	states.texture = &m_font->getTexture(m_characterSize);
 	
-	if (m_characterLimit >= m_displayableCharacters)
-		return;
+	if (m_shouldUpdateVertices)
+		updateVertices();
 	
-	for (size_t i = 0; i < m_charOutlineVertices.getVertexCount(); i+=6) {
-		if (m_charNumberOfCharOutline[i/6] < m_characterLimit) {
-			for (size_t j = i; j < i+6; j++)
-				m_partialDisplayVertices.append(m_charOutlineVertices[j]);
-		}
-		else
-			break;
+	if (m_charOutlineVertices.getVertexCount() > 0)
+		target.draw(m_charOutlineVertices, states);
+	if (m_lineOutlineVertices.getVertexCount() > 0)
+		target.draw(m_lineOutlineVertices, states);
+	if (m_charVertices.getVertexCount() > 0)
+		target.draw(m_charVertices, states);
+	if (m_lineVertices.getVertexCount() > 0)
+		target.draw(m_lineVertices, states);
+}
+
+RichText::VariableStyle::VariableStyle() {
+	bolds.push_back(false);
+	italics.push_back(false);
+	underlineds.push_back(false);
+	strikeThroughs.push_back(false);
+	fillColors.push_back(sf::Color::Black);
+	outlineThicknesses.push_back(0.f);
+	outlineColors.push_back(sf::Color::White);
+	letterSpacingFactors.push_back(1.f);
+	lineSpacingFactors.push_back(1.f);
+}
+
+void RichText::VariableStyle::rewind() {
+	while (bolds.size() > 1)
+		bolds.pop_back();
+	while (italics.size() > 1)
+		italics.pop_back();
+	while (underlineds.size() > 1)
+		underlineds.pop_back();
+	while (strikeThroughs.size() > 1)
+		strikeThroughs.pop_back();
+	while (fillColors.size() > 1)
+		fillColors.pop_back();
+	while (outlineThicknesses.size() > 1)
+		outlineThicknesses.pop_back();
+	while (outlineColors.size() > 1)
+		outlineColors.pop_back();
+	while (letterSpacingFactors.size() > 1)
+		letterSpacingFactors.pop_back();
+	while (lineSpacingFactors.size() > 1)
+		lineSpacingFactors.pop_back();
+}
+
+template <>
+RichText::SpecializedStylizer<bool>::SpecializedStylizer(Stylizer::StyleProperty const& type) : Stylizer (type) {
+	switch (type) {
+	case Bold:
+		m_styleMember = &VariableStyle::bolds; break;
+	case Italic:
+		m_styleMember = &VariableStyle::italics; break;
+	case Underlined:
+		m_styleMember = &VariableStyle::underlineds; break;
+	case StrikeThrough:
+		m_styleMember = &VariableStyle::strikeThroughs; break;
+	default:
+		break;
 	}
-	
-	//Determine the line of the character limit
-	size_t line = 0;
-	while (line < m_lastCharNumberInLine.size() && m_lastCharNumberInLine[line] < m_characterLimit)
-		line++;
-	
-	float rightLimit = m_charVertices[(m_characterLimit-1)*6+5].position.x;
-	float addedLineWidth = 1.f;
-	
-	for (size_t i = 0; i < m_lineOutlineVertices.getVertexCount(); i+=6) {
-		size_t lineLine = m_lineNumberOfLineOutline[i/6];
-		if (lineLine < line) {
-			for (size_t j = i; j < i+6; j++)
-				m_partialDisplayVertices.append(m_lineOutlineVertices[j]);
-		}
-		else if (lineLine == line && m_lineOutlineVertices[i].position.x < rightLimit) {
-			for (size_t j = i; j < i+6; j++)
-				m_partialDisplayVertices.append(m_lineOutlineVertices[j]);
-			float thickness = std::floor((m_lineOutlineVertices[i+5].position.y - m_lineOutlineVertices[i].position.y) / 2);
-			if (m_lineOutlineVertices[i+5].position.x > rightLimit) {
-				size_t k = m_partialDisplayVertices.getVertexCount();
-				m_partialDisplayVertices[k-5].position.x = rightLimit + thickness + addedLineWidth;
-				m_partialDisplayVertices[k-2].position.x = rightLimit + thickness + addedLineWidth;
-				m_partialDisplayVertices[k-1].position.x = rightLimit + thickness + addedLineWidth;
-			}
-		}
+}
+
+template <>
+RichText::SpecializedStylizer<float>::SpecializedStylizer(Stylizer::StyleProperty const& type) : Stylizer (type) {
+	switch (type) {
+	case OutlineThickness:
+		m_styleMember = &VariableStyle::outlineThicknesses; break;
+	case LetterSpacing:
+		m_styleMember = &VariableStyle::letterSpacingFactors; break;
+	case LineSpacing:
+		m_styleMember = &VariableStyle::lineSpacingFactors; break;
+	default:
+		break;
 	}
-	
-	for (size_t i = 0; i < m_characterLimit; i++) {
-		for (size_t j = 6*i; j < 6*i+6; j++) {
-			m_partialDisplayVertices.append(m_charVertices[j]);
-		}
+}
+
+template <>
+RichText::SpecializedStylizer<sf::Color>::SpecializedStylizer(Stylizer::StyleProperty const& type) : Stylizer (type) {
+	switch (type) {
+	case FillColor:
+		m_styleMember = &VariableStyle::fillColors; break;
+	case OutlineColor:
+		m_styleMember = &VariableStyle::outlineColors; break;
+	default: break;
 	}
-	
-	for (size_t i = 0; i < m_lineVertices.getVertexCount(); i+=6) {
-		size_t lineLine = m_lineNumberOfLine[i/6];
-		if (lineLine < line) {
-			for (size_t j = i; j < i+6; j++)
-				m_partialDisplayVertices.append(m_lineVertices[j]);
-		}
-		else if (lineLine == line && m_lineVertices[i].position.x < rightLimit) {
-			for (size_t j = i; j < i+6; j++)
-				m_partialDisplayVertices.append(m_lineVertices[j]);
-			if (lineLine == line && m_lineVertices[i+5].position.x > rightLimit) {
-				size_t k = m_partialDisplayVertices.getVertexCount();
-				m_partialDisplayVertices[k-5].position.x = rightLimit + addedLineWidth;
-				m_partialDisplayVertices[k-2].position.x = rightLimit + addedLineWidth;
-				m_partialDisplayVertices[k-1].position.x = rightLimit + addedLineWidth;
-			}
-		}
-		else { break; }
+}
+
+template<class T>
+RichText::EnderStylizer<T>::EnderStylizer(Stylizer::StyleProperty type) : SpecializedStylizer<T>(type) {}
+
+template<class T>
+RichText::Stylizer::StyleProperty RichText::EnderStylizer<T>::stylize(VariableStyle& vs) const {
+	if ((vs.*this->m_styleMember).size() > 1) {
+		T popped = (vs.*this->m_styleMember).back();
+		(vs.*this->m_styleMember).pop_back();
+		if (popped == (vs.*this->m_styleMember).back())
+			return Stylizer::None;
+		return this->m_type;
+	}
+	else
+		return Stylizer::None;
+}
+
+template<class T>
+RichText::StarterStylizer<T>::StarterStylizer(Stylizer::StyleProperty type) : SpecializedStylizer<T>(type), activated(false) {}
+
+template<class T>
+RichText::StarterStylizer<T>::StarterStylizer(Stylizer::StyleProperty type, T value) : SpecializedStylizer<T>(type), activated(true), m_value(value) {}
+
+template<class T>
+RichText::Stylizer::StyleProperty RichText::StarterStylizer<T>::stylize(VariableStyle& vs) const {
+	if (!activated) {
+		(vs.*this->m_styleMember).push_back((vs.*this->m_styleMember).back());
+		return Stylizer::None;
+	}
+	else if ((vs.*this->m_styleMember).back() == m_value) {
+		(vs.*this->m_styleMember).push_back(m_value);
+		return Stylizer::None;
+	}
+	else {
+		(vs.*this->m_styleMember).push_back(m_value);
+		return this->m_type;
 	}	
-	
-	m_partialDisplayNeedsUpdate = false;
+}
+
+template<class T>
+void RichText::StarterStylizer<T>::setValue(T value) {
+	m_value = value;
+	activated = true;
 }
