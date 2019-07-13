@@ -1,4 +1,5 @@
 #include <SFML/Graphics.hpp>
+#include "main.hpp"
 #include "richtext.h"
 #include <functional>
 
@@ -11,26 +12,26 @@ int main() {
 
 	sf::Font font;
 	font.loadFromFile("Resources/OpenSans.ttf");
-	
+
 	RichText rt(font, "This is normal text. Here co<u>Mes underlined. Outlines th<ot=2>En arrive. Fancy co<c=red,id=0>Lors, too. They can cha<oc=green,id=1>Nge through pressing Return. A line pa\nSses. It brings sp<lts=3,lns=1.1>Acing. Now strik<s,id=1>Ethrough joins - it can change too -, and underlined lea</u>Ves. No more c</c>Olo</oc>Rs. No more </ot,/oc>Outlines either. A line pass\nEs, and the spa</lts,/lns>Cing ends. Finally striket</s>Hrough leaves. Two li\n\nNes pass. It ends here. An extension can be added by pressing X.\n", 25);
 	bool state = 0;
 	float horizontalLimit = 600;
 	rt.setHorizontalLimit(horizontalLimit);
 	rt.setCharacterLimit(200);
-	
+
 	size_t highlighted = 0;
 	sf::RectangleShape highlightRect;
 	highlightRect.setFillColor(sf::Color::Yellow);
 	sf::FloatRect charBounds = rt.findCharacterBounds(highlighted);
 	highlightRect.setPosition(charBounds.left, charBounds.top);
 	highlightRect.setSize(sf::Vector2f(charBounds.width, charBounds.height));
-	
+
 	sf::RectangleShape boundsRect;
 	boundsRect.setFillColor(sf::Color::Blue);
 	sf::FloatRect bounds = rt.getLocalBounds();
 	boundsRect.setPosition(bounds.left, bounds.top);
 	boundsRect.setSize(sf::Vector2f(bounds.width, bounds.height));
-	
+
     while (window.isOpen()) {
         while (window.pollEvent(haps)) {
             if (haps.type == sf::Event::Closed)
@@ -61,7 +62,7 @@ int main() {
 					break;
 				case sf::Keyboard::Right:
 					rt.setCharacterLimit(rt.getCharacterLimit()+1);
-					break;	
+					break;
 				}
 				case sf::Keyboard::PageDown:
 					rt.setCharacterLimit(rt.getMaxEffectiveCharacterLimit());
@@ -73,7 +74,7 @@ int main() {
 					rt.parseString("Another extension can be added by pressing X. ", true);
 					break;
 				default:
-					break;				
+					break;
 				}
 				bounds = rt.getLocalBounds();
 				boundsRect.setPosition(bounds.left, bounds.top);
