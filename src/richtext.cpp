@@ -45,7 +45,7 @@ void RichText::parseString(sf::String const& s, bool append) {
 		{"lts", Stylizer::LetterSpacing},
 		{"lns", Stylizer::LineSpacing}
 	};
-	
+
 	const std::unordered_map<std::string, sf::Color> colorMap {
 		{"black", sf::Color::Black},
 		{"white", sf::Color::White},
@@ -57,29 +57,29 @@ void RichText::parseString(sf::String const& s, bool append) {
 		{"cyan", sf::Color::Cyan},
 		{"transparent", sf::Color::Transparent}
 	};
-	
+
 	m_shouldUpdateVertices = true;
-	
+
 	if (!append) {
 		m_string.clear();
 		for (auto it = m_stylizers.begin(); it != m_stylizers.end(); it++)
 			delete it->second;
 		m_stylizers.clear();
 		m_modifiableStylizers.clear();
-		
+
 		m_charVertices.clear();
 		m_lineVertices.clear();
 		m_charOutlineVertices.clear();
 		m_lineOutlineVertices.clear();
 
 		m_totalDisplayableCharacters = 0;
-		
+
 		m_updateStartLine = 0;
 	}
 	else {
 		m_updateStartLine = std::min(m_lineStart_i.size()-1, m_updateStartLine);
 	}
-	
+
 	size_t i = 0;
 	size_t true_i = m_string.getSize();
 	size_t i_displayOnly = m_totalDisplayableCharacters;
@@ -89,7 +89,7 @@ void RichText::parseString(sf::String const& s, bool append) {
 			std::vector<Stylizer*> stylizers;
 			bool modifiable = false;
 			int ID;
-			
+
 			size_t tags_end = s.find('>', i+1);
 			sf::String tags = s.substring(i+1, tags_end-i-1);
 			size_t spacePos = tags.find(' ');
@@ -97,7 +97,7 @@ void RichText::parseString(sf::String const& s, bool append) {
 				tags.erase(spacePos, 1);
 				spacePos = tags.find(' ');
 			}
-			
+
 			sf::String fullTag;
 			size_t start = 0;
 			size_t end;
@@ -109,7 +109,7 @@ void RichText::parseString(sf::String const& s, bool append) {
 				bool ender = (tag.getSize() > 1 && tag[0] == '/');
 				bool inactive = (tag.getSize() > 1 && tag[0] == '!');
 				sf::String arg = (argPos >= fullTag.getSize()-1) ? "" : fullTag.substring(argPos+1);
-				
+
 				auto it = tagMap.find((ender || inactive) ? tag.substring(1) : tag);
 				if (it != tagMap.end()) {
 					switch (it->second) {
@@ -152,7 +152,7 @@ void RichText::parseString(sf::String const& s, bool append) {
 								auto colorIt = colorMap.find(arg);
 								if (colorIt != colorMap.end())
 									stylizers.push_back(new StarterStylizer<sf::Color>(it->second, colorIt->second));
-							}							
+							}
 						}
 						break;
 					}
@@ -175,12 +175,12 @@ void RichText::parseString(sf::String const& s, bool append) {
 							}
 							if (j == arg.getSize()) {
 								stylizers.push_back(new StarterStylizer<float>(it->second, f));
-							}	
+							}
 						}
 						break;
 					default:
 						break;
-					}	
+					}
 				}
 				else if (tag == "id") {
 					if (arg.getSize() == 0)
@@ -197,20 +197,20 @@ void RichText::parseString(sf::String const& s, bool append) {
 						ID = tempID;
 					}
 				}
-				
+
 				start = end+1;
 			} while (end != sf::String::InvalidPos);
-			
+
 			for (auto it = stylizers.begin(); it != stylizers.end(); it++) {
 				m_stylizers.emplace(true_i, *it);
 			}
-			
+
 			if (modifiable) {
 				for (auto it = stylizers.begin(); it != stylizers.end(); it++) {
 					m_modifiableStylizers.emplace(ID, *it);
 				}
 			}
-			
+
 			i = tags_end;
 		}
 		else if (s[i] != '\r') {
@@ -223,7 +223,7 @@ void RichText::parseString(sf::String const& s, bool append) {
 		}
 		i++;
 	}
-	
+
 	m_totalDisplayableCharacters = i_displayOnly;
 }
 
@@ -236,7 +236,7 @@ void RichText::setFont(const sf::Font &font) {
 	initializeLineStarts();
 }
 
-void RichText::setCharacterSize(uint size) { 
+void RichText::setCharacterSize(uint size) {
 	m_characterSize = size;
 	m_shouldUpdateVertices = true;
 	m_updateStartLine = 0;
@@ -349,7 +349,7 @@ void RichText::setOutlineThickness(float thickness) {
 	m_style.outlineThicknesses.front() = thickness;
 	m_updateStartLine = 0;
 	m_shouldUpdateVertices = true;
-	
+
 }
 
 void RichText::setOutlineThickness(int ID, float thickness) {
@@ -410,7 +410,7 @@ void RichText::setLetterSpacingFactor(int ID, float factor) {
 		if (it->second->getType() == Stylizer::LetterSpacing) {
 			static_cast<StarterStylizer<float>*>(it->second)->setValue(factor);
 			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
-			m_shouldUpdateVertices = true;	
+			m_shouldUpdateVertices = true;
 		}
 	}
 }
@@ -420,7 +420,7 @@ void RichText::setLetterSpacingFactor(int ID, bool activated) {
 		if (it->second->getType() == Stylizer::LetterSpacing) {
 			static_cast<StarterStylizer<float>*>(it->second)->activated = activated;
 			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
-			m_shouldUpdateVertices = true;	
+			m_shouldUpdateVertices = true;
 		}
 	}
 }
@@ -436,7 +436,7 @@ void RichText::setLineSpacingFactor(int ID, float factor) {
 		if (it->second->getType() == Stylizer::LineSpacing) {
 			static_cast<StarterStylizer<float>*>(it->second)->setValue(factor);
 			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
-			m_shouldUpdateVertices = true;	
+			m_shouldUpdateVertices = true;
 		}
 	}
 }
@@ -446,7 +446,7 @@ void RichText::setLineSpacingFactor(int ID, bool activated) {
 		if (it->second->getType() == Stylizer::LineSpacing) {
 			static_cast<StarterStylizer<float>*>(it->second)->activated = activated;
 			m_updateStartLine = std::min(m_updateStartLine, it->second->line);
-			m_shouldUpdateVertices = true;	
+			m_shouldUpdateVertices = true;
 		}
 	}
 }
@@ -476,16 +476,16 @@ float RichText::getHorizontalLimit() const { return m_horizontalLimit; }
 void RichText::setCharacterLimit(size_t limit) {
 	if (m_characterLimit == limit)
 		return;
-	
+
 	if (!(m_characterLimit >= m_totalDisplayableCharacters && limit >= m_totalDisplayableCharacters)) {
 		size_t startLine = 0;
 		while (startLine < m_lineStart_i.size() && m_lineStart_char[startLine] / 6 < limit)
 			startLine++;
-		
+
 		m_shouldUpdateVertices = true;
 		m_updateStartLine = std::min(m_updateStartLine, (startLine == 0) ? 0 : startLine-1);
 	}
-	
+
 	m_characterLimit = limit;
 }
 
@@ -496,30 +496,30 @@ size_t RichText::getMaxEffectiveCharacterLimit() const { return m_totalDisplayab
 sf::FloatRect RichText::findCharacterBounds(size_t index) const {
 	if (!m_font || m_string.getSize() == 0 || index >= m_string.getSize())
 		return sf::FloatRect();
-	
+
 	float whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
 	float letterSpacing = (whitespaceWidth / 3.f) * (m_style.letterSpacingFactors.front() - 1.f);
 	float lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.front();
-	
+
 	sf::Vector2f pos(0, lineSpacing - m_characterSize);
 	bool inWord = false;
 	float currentLineWidth = 0;
 	bool intentionalLineBreak = true;
 	float whiteSpaceWidthAtWordStart = 0;
-	
+
 	bool passedTarget = false;
 	bool shouldStop = false;
 	float extraWidth = 0;
-	
+
 	float characterWidth = 0;
-	
+
 	auto it = m_stylizers.begin();
 	sf::Uint32 previousChar = 0;
 	size_t i = 0;
 	while (i < m_string.getSize() && !shouldStop) {
 		if (i >= index)
 			passedTarget = true;
-		
+
 		while (it != m_stylizers.end() && it->first <= i) {
 			switch (it->second->stylize(m_style)) {
 			case Stylizer::LetterSpacing:
@@ -535,7 +535,7 @@ sf::FloatRect RichText::findCharacterBounds(size_t index) const {
 			}
 			it++;
 		}
-		
+
 		switch (m_string[i]) {
 		case ' ':
 			if (i == index)
@@ -550,7 +550,7 @@ sf::FloatRect RichText::findCharacterBounds(size_t index) const {
 				currentLineWidth = pos.x;
 				intentionalLineBreak = false;
 			}
-			
+
 			pos.x += whitespaceWidth;
 			if (intentionalLineBreak) {
 				currentLineWidth = pos.x;
@@ -588,7 +588,7 @@ sf::FloatRect RichText::findCharacterBounds(size_t index) const {
 				currentLineWidth = pos.x;
 				intentionalLineBreak = false;
 			}
-			
+
 			pos.x += added;
 			if (intentionalLineBreak) {
 				currentLineWidth = pos.x;
@@ -605,7 +605,7 @@ sf::FloatRect RichText::findCharacterBounds(size_t index) const {
 				characterWidth = added;
 			if (passedTarget)
 				extraWidth += added;
-			
+
 			if (currentLineWidth > 0 && pos.x > m_horizontalLimit) {
 				pos.x -= currentLineWidth + whiteSpaceWidthAtWordStart;
 				pos.y += lineSpacing;
@@ -613,11 +613,11 @@ sf::FloatRect RichText::findCharacterBounds(size_t index) const {
 			}
 			break;
 		}
-		
+
 		previousChar = m_string[i];
 		i++;
 	}
-	
+
 	m_style.rewind();
 	return sf::FloatRect(pos.x - extraWidth, pos.y, characterWidth, lineSpacing);
 }
@@ -663,7 +663,7 @@ void addGlyphQuad(sf::VertexArray& vertices, sf::Vector2f position, sf::Color co
 
 	sf::Vertex bottomLeft(sf::Vector2f(position.x + left  - italicShear * bottom - outlineThickness, position.y + bottom - outlineThickness), color, sf::Vector2f(u1, v2));
 	sf::Vertex topRight(sf::Vertex(sf::Vector2f(position.x + right - italicShear * top - outlineThickness, position.y + top - outlineThickness), color, sf::Vector2f(u2, v1)));
-			
+
 	vertices.append(sf::Vertex(sf::Vector2f(position.x + left  - italicShear * top - outlineThickness, position.y + top - outlineThickness), color, sf::Vector2f(u1, v1)));
 	vertices.append(topRight);
 	vertices.append(bottomLeft);
@@ -679,7 +679,7 @@ void addLine(sf::VertexArray& vertices, sf::Vector2f origin, float lineLength, c
 
 	sf::Vertex bottomLeft(sf::Vector2f(origin.x - outlineThickness, bottom + outlineThickness), color, sf::Vector2f(1, 1));
 	sf::Vertex topRight(sf::Vector2f(origin.x + lineLength + outlineThickness, top - outlineThickness), color, sf::Vector2f(1, 1));
-	
+
 	vertices.append(sf::Vertex(sf::Vector2f(origin.x - outlineThickness, top - outlineThickness), color, sf::Vector2f(1, 1)));
 	vertices.append(topRight);
 	vertices.append(bottomLeft);
@@ -715,17 +715,17 @@ void roundNewVertices(sf::VertexArray& va, size_t newVerticesStart) {
 void RichText::updateVertices() const {
 	if (!m_font)
 		return;
-	
+
 	if (!m_shouldUpdateVertices)
 		return;
-	
-	//Updating from a certain line:	
+
+	//Updating from a certain line:
 	//Don't update if the starting line is after all explored lines
 	if (m_updateStartLine >= m_lineStart_i.size()) {
 		m_updateStartLine = std::numeric_limits<size_t>::max();
 		return;
 	}
-	
+
 	//First, make all the lines after the starting line unexplored:
 	m_lineStart_i.resize(m_updateStartLine+1);
 	m_lineStart_verticalPos.resize(m_updateStartLine+1);
@@ -733,7 +733,7 @@ void RichText::updateVertices() const {
 	resizeLineStartMap(m_lineStart_line, m_updateStartLine+1);
 	resizeLineStartMap(m_lineStart_charOutline, m_updateStartLine+1);
 	resizeLineStartMap(m_lineStart_lineOutline, m_updateStartLine+1);
-	
+
 	//Discard the vertex arrays' information starting from the starting line.
 	//We keep the indices so that they can be used at the end of the program for pixel alignment of all new vertices
 	size_t startOfNewCharVertices = m_lineStart_char[m_updateStartLine];
@@ -744,12 +744,12 @@ void RichText::updateVertices() const {
 	m_lineVertices.resize(startOfNewLineVertices);
 	size_t startOfNewLineOutlineVertices = getLastVerticesIndexBeforeLine(m_lineStart_lineOutline, m_updateStartLine);
 	m_lineOutlineVertices.resize(startOfNewLineOutlineVertices);
-	
+
 	//Populate the starting variables with the line start info
 	size_t i = m_lineStart_i[m_updateStartLine];
 	sf::Vector2f pos(0, m_lineStart_verticalPos[m_updateStartLine]);
 	size_t i_displayOnly = m_charVertices.getVertexCount() / 6;
-	
+
 	//Populate the complex variables with the default style values
 	m_style.rewind();
 	float whitespaceWidth = m_font->getGlyph(L' ', m_characterSize, false).advance;
@@ -757,7 +757,7 @@ void RichText::updateVertices() const {
 	whitespaceWidth += letterSpacing;
 	float lineSpacing = m_font->getLineSpacing(m_characterSize) * m_style.lineSpacingFactors.front();
 	float lineThickness = m_font->getUnderlineThickness(m_characterSize);
-	
+
 	sf::Vector2f underlineStart(pos.x, pos.y + m_font->getUnderlinePosition(m_characterSize));
 	sf::Vector2f underlineOutlineStart = underlineStart;
 	sf::FloatRect xBounds = m_font->getGlyph(L'x', m_characterSize, false).bounds;
@@ -765,7 +765,7 @@ void RichText::updateVertices() const {
 	sf::Vector2f strikeThroughOutlineStart = strikeThroughStart;
 	float italicShear = m_style.italics.back() ? 0.209f : 0.f;
 	bool hasOutline = m_style.outlineThicknesses.front() != 0.f;
-	
+
 	//Now, update the style (and complex variables) by iterating through the stylizers up to the starting line
 	auto it = m_stylizers.begin();
 	while (it != m_stylizers.end() && it->first <= i) {
@@ -789,27 +789,27 @@ void RichText::updateVertices() const {
 		}
 		it++;
 	}
-	
+
 	sf::VertexArray wordCharVertices = sf::VertexArray(sf::Triangles);
 	sf::VertexArray wordLineVertices  = sf::VertexArray(sf::Triangles);
 	sf::VertexArray wordCharOutlineVertices  = sf::VertexArray(sf::Triangles);
 	sf::VertexArray wordLineOutlineVertices  = sf::VertexArray(sf::Triangles);
-	
+
 	float lineSpacingAtWordStart = lineSpacing;
 	float outlineThicknessAtWordStart = m_style.outlineThicknesses.back();
 	float whitespaceWidthAtWordStart = 0;
 	size_t whitespacesAtWordStart = 0;
-	size_t i_atWordStart = 0;	
-	
+	size_t i_atWordStart = 0;
+
 	float currentLineWidth = 0.f;
 	bool intentionalLineBreak = true; //When true, whitespace before the first word of a line can push it to line wrapping; becomes false after a line wrap (the whitespace "disappears").
-	
+
 	size_t currentLine = m_updateStartLine;
 	m_updateStartLine = std::numeric_limits<size_t>::max();
-	
+
 	bool reachedCharacterLimit = false;
-	
-	const std::function<void()> addWordToText = [&]() { 
+
+	const std::function<void()> addWordToText = [&]() {
 		for (size_t i = 0; i < wordCharVertices.getVertexCount(); i++)
 			m_charVertices.append(wordCharVertices[i]);
 		for (size_t i = 0; i < wordLineVertices.getVertexCount(); i+=6) {
@@ -823,13 +823,13 @@ void RichText::updateVertices() const {
 				m_lineOutlineVertices.append(wordLineOutlineVertices[j]);
 		}
 	};
-	
+
 	const std::function<void()> resetWord = [&]() {
 		wordCharVertices.clear();
 		wordLineVertices.clear();
 		wordCharOutlineVertices.clear();
 		wordLineOutlineVertices.clear();
-		
+
 		currentLineWidth = pos.x;
 		lineSpacingAtWordStart = lineSpacing;
 		outlineThicknessAtWordStart = m_style.outlineThicknesses.back();
@@ -837,11 +837,11 @@ void RichText::updateVertices() const {
 		whitespacesAtWordStart = 0;
 		i_atWordStart = i;
 	};
-	
+
 	const std::function<void()> setLineStarts = [&]() {
 		m_lineStart_i.push_back(i_atWordStart + whitespacesAtWordStart);
 		m_lineStart_verticalPos.push_back(pos.y);
-		
+
 		m_lineStart_char.push_back(m_charVertices.getVertexCount());
 		if (m_lineStart_charOutline.rbegin()->second != m_charOutlineVertices.getVertexCount()) //If any char outlines were added since the last line logged in the map
 			m_lineStart_charOutline.emplace(currentLine, m_charOutlineVertices.getVertexCount());
@@ -850,12 +850,12 @@ void RichText::updateVertices() const {
 		if (m_lineStart_lineOutline.rbegin()->second != m_lineOutlineVertices.getVertexCount())
 			m_lineStart_lineOutline.emplace(currentLine, m_lineOutlineVertices.getVertexCount());
 	};
-	
+
 	sf::Uint32 previousChar = 0;
 	size_t len = m_string.getSize();
-	
+
 	while (i < len) {
-		if (i_displayOnly == m_characterLimit) {			
+		if (i_displayOnly == m_characterLimit) {
 			if (m_style.underlineds.back()) {
 				addLine(wordLineVertices, underlineStart, pos.x - underlineStart.x, m_style.fillColors.back(), lineThickness);
 				if (hasOutline) {
@@ -868,10 +868,10 @@ void RichText::updateVertices() const {
 					addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 				}
 			}
-			
+
 			reachedCharacterLimit = true;
 		}
-		
+
 		if (it != m_stylizers.end() && it->first == i) { //If stylizers exist at i
 			bool shouldUpdateUnderline = false, shouldUpdateUnderlineOutline = false, shouldUpdateStrikeThrough = false, shouldUpdateStrikeThroughOutline = false;
 			bool wasUnderlined = m_style.underlineds.back();
@@ -881,7 +881,7 @@ void RichText::updateVertices() const {
 			sf::Color oldFillColor = m_style.fillColors.back();
 			float oldOutlineThickness = m_style.outlineThicknesses.back();
 			sf::Color oldOutlineColor = m_style.outlineColors.back();
-			
+
 			while (it != m_stylizers.end() && it->first == i) { //Modify the style; the return type gives info on whether or not the modification changed the style visually
 				it->second->line = currentLine;
 				switch (it->second->stylize(m_style)) {
@@ -922,7 +922,7 @@ void RichText::updateVertices() const {
 				}
 				it++;
 			}
-				
+
 			if (!reachedCharacterLimit) {
 				if (shouldUpdateUnderline) {
 					if (wasUnderlined)
@@ -949,13 +949,13 @@ void RichText::updateVertices() const {
 						strikeThroughOutlineStart.x = pos.x;
 				}
 			}
-			
+
 		}
-		
+
 		sf::Uint32 currentChar = m_string[i];
-		
+
 		bool shouldStop = false;
-		
+
 		switch (currentChar) {
 		case ' ': {
 			if (reachedCharacterLimit) {
@@ -967,7 +967,7 @@ void RichText::updateVertices() const {
 				resetWord();
 				intentionalLineBreak = false;
 			}
-			
+
 			pos.x += whitespaceWidth;
 			if (intentionalLineBreak) {
 				currentLineWidth = pos.x;
@@ -990,7 +990,7 @@ void RichText::updateVertices() const {
 				resetWord();
 				intentionalLineBreak = false;
 			}
-			
+
 			pos.x += added;
 			if (intentionalLineBreak) {
 				currentLineWidth = pos.x;
@@ -1006,10 +1006,10 @@ void RichText::updateVertices() const {
 				shouldStop = true;
 				break;
 			}
-			
+
 			addWordToText();
 			resetWord();
-			
+
 			if (m_style.underlineds.back()) {
 				addLine(m_lineVertices, underlineStart, pos.x - underlineStart.x, m_style.fillColors.back(), lineThickness);
 				if (hasOutline) {
@@ -1024,26 +1024,26 @@ void RichText::updateVertices() const {
 			}
 			pos.x = 0;
 			pos.y += lineSpacing;
-			
+
 			underlineStart.x = 0;
 			underlineStart.y += lineSpacing;
 			underlineOutlineStart = underlineStart;
 			strikeThroughStart.x = 0;
 			strikeThroughStart.y += lineSpacing;
 			strikeThroughOutlineStart = strikeThroughStart;
-			
+
 			currentLineWidth = 0;
 			currentLine++;
 			whitespacesAtWordStart++;
-			
+
 			setLineStarts();
-			
+
 			intentionalLineBreak = true;
 			break;
 		}
-		default: {			
+		default: {
 			pos.x += m_font->getKerning(previousChar, m_string[i], m_characterSize);
-			
+
 			sf::Glyph const& g = m_font->getGlyph(m_string[i], m_characterSize, m_style.bolds.back());
 			if (!reachedCharacterLimit) {
 				addGlyphQuad(wordCharVertices, pos, m_style.fillColors.back(), g, italicShear);
@@ -1052,12 +1052,12 @@ void RichText::updateVertices() const {
 			}
 			pos.x += g.advance + letterSpacing;
 			i_displayOnly++;
-			
+
 			//Move the word down a line if it became too long
 			if (currentLineWidth != 0.f && pos.x > m_horizontalLimit) {
 				float extendedLineWidth = currentLineWidth + whitespaceWidthAtWordStart;
 				sf::Vector2f wordMovement(-extendedLineWidth, lineSpacingAtWordStart);
-								
+
 				//If a line was in progress and started before the word, finish it before moving on
 				if (!reachedCharacterLimit) {
 					if (m_style.underlineds.back()) {
@@ -1068,7 +1068,7 @@ void RichText::updateVertices() const {
 						if (hasOutline && underlineOutlineStart.x < currentLineWidth) {
 							addLine(m_lineOutlineVertices, underlineOutlineStart, currentLineWidth - underlineOutlineStart.x, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 							underlineOutlineStart.x = extendedLineWidth;
-						}	
+						}
 					}
 					if (m_style.strikeThroughs.back()) {
 						if (strikeThroughStart.x < currentLineWidth) {
@@ -1081,7 +1081,7 @@ void RichText::updateVertices() const {
 						}
 					}
 				}
-				
+
 				//If any finished line in the word stemmed from before it, cut it in half at the start of the word (one half will stay, the other will move with the word)
 				for (size_t i = 0; i < wordLineVertices.getVertexCount(); i += 6) {
 					if (wordLineVertices[i].position.x <= currentLineWidth) {
@@ -1094,7 +1094,7 @@ void RichText::updateVertices() const {
 							m_lineVertices.append(v);
 						}
 					}
-					
+
 					for (size_t j = i; j < i+6; j++) {
 						wordLineVertices[j].position += wordMovement;
 					}
@@ -1103,7 +1103,7 @@ void RichText::updateVertices() const {
 					if (wordLineOutlineVertices[i].position.x + outlineThicknessAtWordStart <= currentLineWidth) {
 						for (size_t j = 0; j < 6; j++) {
 							sf::Vertex v = wordLineOutlineVertices[i+j];
-							
+
 							if (j == 1 || j == 4 || j == 5)
 								v.position.x = roundf(currentLineWidth + outlineThicknessAtWordStart);
 							else
@@ -1111,45 +1111,45 @@ void RichText::updateVertices() const {
 							m_lineOutlineVertices.append(v);
 						}
 					}
-					
+
 					for (size_t j = i; j < i+6; j++) {
 						wordLineOutlineVertices[j].position += wordMovement;
 					}
 				}
-				
+
 				for (size_t i = 0; i < wordCharVertices.getVertexCount(); i++) {
 					wordCharVertices[i].position += wordMovement;
 				}
 				for (size_t i = 0; i < wordCharOutlineVertices.getVertexCount(); i++) {
 					wordCharOutlineVertices[i].position += wordMovement;
 				}
-				
+
 				pos += wordMovement;
 				underlineStart += wordMovement;
 				underlineOutlineStart += wordMovement;
 				strikeThroughStart += wordMovement;
 				strikeThroughOutlineStart += wordMovement;
-				
+
 				currentLineWidth = 0;
 				currentLine++;
-				
+
 				setLineStarts();
-				
+
 				if (reachedCharacterLimit)
 					shouldStop = true;
 			}
-			
+
 			break;
 		}
 		}
-		
+
 		if (shouldStop)
 			break;
-		
+
 		previousChar = m_string[i];
 		i++;
 	}
-	
+
 	if (!reachedCharacterLimit) {
 		float excessWhiteSpace = wordCharVertices.getVertexCount() == 0 ? whitespaceWidthAtWordStart : 0;
 		if (m_style.underlineds.back()) {
@@ -1163,14 +1163,14 @@ void RichText::updateVertices() const {
 				addLine(wordLineOutlineVertices, strikeThroughOutlineStart, pos.x - strikeThroughOutlineStart.x - excessWhiteSpace, m_style.outlineColors.back(), lineThickness, m_style.outlineThicknesses.back());
 		}
 	}
-	
+
 	addWordToText();
-	
+
 	roundNewVertices(m_charVertices, startOfNewCharVertices);
 	roundNewVertices(m_charOutlineVertices, startOfNewCharOutlineVertices);
 	roundNewVertices(m_lineVertices, startOfNewLineVertices);
 	roundNewVertices(m_lineOutlineVertices, startOfNewLineOutlineVertices);
-	
+
 	//Compute bounds; in a square of 6 vertices, the first one is the upper left and the last one the bottom right
 	float minX = std::numeric_limits<float>::infinity(), minY = std::numeric_limits<float>::infinity(),
 		  maxX = std::numeric_limits<float>::lowest(),	 maxY = std::numeric_limits<float>::lowest();
@@ -1185,27 +1185,27 @@ void RichText::updateVertices() const {
 			maxY = fmaxf(maxY, a[j+5].position.y);
 		}
 	}
-	
+
 	m_bounds.top = minY;
 	m_bounds.left = minX;
 	m_bounds.width = maxX - minX;
 	m_bounds.height = maxY - minY;
-	
+
 	m_style.rewind();
-	
+
 	m_shouldUpdateVertices = false;
 }
 
 void RichText::draw(sf::RenderTarget& target, sf::RenderStates states) const {
 	if (!m_font)
 		return;
-	
+
 	states.transform *= getTransform();
 	states.texture = &m_font->getTexture(m_characterSize);
-	
+
 	if (m_shouldUpdateVertices)
 		updateVertices();
-	
+
 	if (m_charOutlineVertices.getVertexCount() > 0)
 		target.draw(m_charOutlineVertices, states);
 	if (m_lineOutlineVertices.getVertexCount() > 0)
@@ -1325,7 +1325,7 @@ RichText::Stylizer::StyleProperty RichText::StarterStylizer<T>::stylize(Variable
 	else {
 		(vs.*this->m_styleMember).push_back(m_value);
 		return this->m_type;
-	}	
+	}
 }
 
 template<class T>
